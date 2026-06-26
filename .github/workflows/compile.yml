@@ -20,9 +20,9 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # Cleaned fix: No curl, no unzip. Uses the cloud runner's native tool.
+    # Fixed: Removed the old --gradle-version flag. Let the native modern system build itself!
     - name: Natively Build Gradle Wrapper Files
-      run: gradle wrapper --gradle-version 8.2.2
+      run: gradle wrapper
 
     - name: Fix line endings and permissions for gradlew
       run: |
