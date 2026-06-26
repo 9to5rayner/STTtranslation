@@ -10,7 +10,8 @@ import android.os.Looper
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
+// Replace line 13:
+import androidx.core.app.ActivityCompat
 import androidx.core.ActivityCompat
 import com.example.groqtranscriber.R
 import com.example.groqtranscriber.audio.AudioRecorder
