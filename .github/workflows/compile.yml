@@ -20,30 +20,20 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # Diagnoses your repository paths so we can see exactly where files live in case of a mismatch
-    - name: Diagnose File Map Structure
-      run: |
-        echo "=== Checking Root Directory ==="
-        ls -la
-        echo "=== Checking App Directory ==="
-        ls -la app || echo "App folder not found at root!"
+    - name: Set up Gradle 8.2.2
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: "8.2.2"
 
-    # Generates a fresh Gradle wrapper matching the cloud runner's modern system
-    - name: Natively Build Gradle Wrapper Files
-      run: gradle wrapper
-
-    # Wipes out potential text formatting artifacts from web browser copy-pasting
-    - name: Fix line endings and permissions for gradlew
+    - name: Force wrapper to use Gradle 8.2.2
       run: |
-        sudo apt-get install -y dos2unix
-        dos2unix gradlew
+        gradle wrapper --gradle-version 8.2.2
         chmod +x gradlew
+        cat gradle/wrapper/gradle-wrapper.properties
 
-    # Compiles the app module directly
     - name: Build Debug APK
-      run: ./gradlew :app:assembleDebug --stacktrace
+      run: ./gradlew assembleDebug --stacktrace
 
-    # Saves your finished app installer as a downloadable ZIP package
     - name: Upload Finished APK
       uses: actions/upload-artifact@v4
       with:
