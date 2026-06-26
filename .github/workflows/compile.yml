@@ -20,11 +20,14 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    - name: Bootstrap Gradle 8.2.2 & Generate Wrapper
+    # Cleaned fix: No curl, no unzip. Uses the cloud runner's native tool.
+    - name: Natively Build Gradle Wrapper Files
+      run: gradle wrapper --gradle-version 8.2.2
+
+    - name: Fix line endings and permissions for gradlew
       run: |
-        curl -L https://services.gradle.org/distributions/gradle-8.2.2-bin.zip -o gradle.zip
-        unzip -q gradle.zip
-        ./gradle-8.2.2/bin/gradle wrapper --gradle-version 8.2.2
+        sudo apt-get install -y dos2unix
+        dos2unix gradlew
         chmod +x gradlew
 
     - name: Build Debug APK
