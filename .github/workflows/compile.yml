@@ -2,14 +2,15 @@ name: Android CI / Cloud Build
 
 on:
   push:
-    branches: [ "main" ] # Triggers every time you save changes to your main branch
-  workflow_dispatch: # Allows you to manually click a button to build anytime
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+    # Uses the latest v4 to stay completely compatible with Node 24+
     - name: Checkout Code
       uses: actions/checkout@v4
 
@@ -20,8 +21,11 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    - name: Grant Execute Permission for Gradle
-      run: chmod +x gradlew
+    - name: Fix line endings and permissions for gradlew
+      run: |
+        sudo apt-get install -y dos2unix
+        dos2unix gradlew
+        chmod +x gradlew
 
     - name: Build Debug APK
       run: ./gradlew assembleDebug
