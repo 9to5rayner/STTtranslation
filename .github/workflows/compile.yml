@@ -27,8 +27,9 @@ jobs:
         dos2unix gradlew
         chmod +x gradlew
 
+# Change this line inside your compile.yml file:
     - name: Build Debug APK
-      run: ./gradlew assembleDebug
+      run: ./gradlew assembleDebug --stacktrace
 
     - name: Upload Finished APK
       uses: actions/upload-artifact@v4
