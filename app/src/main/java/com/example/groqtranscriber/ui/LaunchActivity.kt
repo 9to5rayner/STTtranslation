@@ -26,7 +26,7 @@ class LaunchActivity : AppCompatActivity() {
         btnLaunch.setOnClickListener {
             val key = etApiKey.text.toString().trim()
             if (key.isEmpty()) {
-                Toast.makeText(this, "Please enter a valid Groq API Key", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Please enter a valid Gemini API Key", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 

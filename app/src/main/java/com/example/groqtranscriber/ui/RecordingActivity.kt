@@ -11,11 +11,11 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
+import androidx.core.ActivityCompat
 import com.example.groqtranscriber.R
 import com.example.groqtranscriber.audio.AudioRecorder
 import com.example.groqtranscriber.audio.AudioChunker
-import com.example.groqtranscriber.api.GroqClient
+import com.example.groqtranscriber.api.GeminiClient
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.TranscriptEntry
 import kotlinx.coroutines.CoroutineScope
@@ -26,16 +26,19 @@ import java.io.File
 class RecordingActivity : AppCompatActivity() {
     private lateinit var audioRecorder: AudioRecorder
     private lateinit var audioChunker: AudioChunker
-    private lateinit var groqClient: GroqClient
+    private lateinit var geminiClient: GeminiClient
     private lateinit var targetLang: String
     
     private var isRecordingSession = true
     private var isSongSkippedMode = false
+    private var isPausedMode = false
+    
     private var chunkIndex = 0
     private var sessionStartTime = 0L
+    private var pauseAccumulatedTime = 0L
+    private var currentChunkStartTime = 0L
 
     private val handler = Handler(Looper.getMainLooper())
-    private var currentChunkFile: File? = null
     private val scope = CoroutineScope(Dispatchers.Main)
     
     private lateinit var tvStatus: TextView
@@ -47,44 +50,63 @@ class RecordingActivity : AppCompatActivity() {
 
         tvStatus = findViewById(R.id.tvStatus)
         tvLog = findViewById(R.id.tvLog)
+        val btnPause = findViewById<Button>(R.id.btnPause)
         val btnSkip = findViewById<Button>(R.id.btnSkip)
         val btnEnd = findViewById<Button>(R.id.btnEnd)
 
         val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("api_key", "") ?: ""
         
-        groqClient = GroqClient(apiKey)
+        // Swapped to Gemini Engine
+        geminiClient = GeminiClient(apiKey)
         audioRecorder = AudioRecorder(this)
         audioChunker = AudioChunker(this)
         targetLang = intent.getStringExtra("TARGET_LANG") ?: "English"
 
-        // Clear out any old transcripts from previous sessions
         SessionData.clear()
         sessionStartTime = System.currentTimeMillis()
 
-        // Request runtime microphone permission if not granted yet
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 200)
         } else {
             startChunkCycle()
         }
 
-        // Skip Song Pause/Resume logic
-        btnSkip.setOnClickListener {
-            isSongSkippedMode = !isSongSkippedMode
-            if (isSongSkippedMode) {
-                btnSkip.text = "Resume Session"
-                tvStatus.text = "Paused (Skip Song Active)"
+        // Pause Button Logic
+        btnPause.setOnClickListener {
+            if (!isRecordingSession || isSongSkippedMode) return@setOnClickListener
+            
+            isPausedMode = !isPausedMode
+            if (isPausedMode) {
+                btnPause.text = "Resume Session"
+                tvStatus.text = "⏸️ Session Paused"
                 audioRecorder.stopRecording()
                 handler.removeCallbacksAndMessages(null)
+                // Track how much time passed in the partial chunk before hitting pause
+                pauseAccumulatedTime += System.currentTimeMillis() - currentChunkStartTime
             } else {
-                btnSkip.text = "Skip Song"
-                tvStatus.text = "Recording active..."
+                btnPause.text = "Pause Session"
+                tvStatus.text = "🔴 Recording active..."
                 startChunkCycle()
             }
         }
 
-        // End Session and transition to the Export Screen
+        // Skip Song Logic
+        btnSkip.setOnClickListener {
+            if (isPausedMode) return@setOnClickListener
+            isSongSkippedMode = !isSongSkippedMode
+            if (isSongSkippedMode) {
+                btnSkip.text = "Resume Music"
+                tvStatus.text = "⏭️ Paused (Skip Song Active)"
+                audioRecorder.stopRecording()
+                handler.removeCallbacksAndMessages(null)
+            } else {
+                btnSkip.text = "Skip Song"
+                tvStatus.text = "🔴 Recording active..."
+                startChunkCycle()
+            }
+        }
+
         btnEnd.setOnClickListener {
             isRecordingSession = false
             handler.removeCallbacksAndMessages(null)
@@ -99,38 +121,38 @@ class RecordingActivity : AppCompatActivity() {
     }
 
     private fun startChunkCycle() {
-        if (!isRecordingSession || isSongSkippedMode) return
+        if (!isRecordingSession || isSongSkippedMode || isPausedMode) return
 
-        val startTimeOffset = System.currentTimeMillis() - sessionStartTime
+        currentChunkStartTime = System.currentTimeMillis()
+        val startTimeOffset = currentChunkStartTime - sessionStartTime
         val chunkFile = audioChunker.createChunkFile(chunkIndex++)
-        currentChunkFile = chunkFile
         
         audioRecorder.startRecording(chunkFile)
 
-        // Automatically cut the file and swap streams every 12 seconds
         handler.postDelayed({
             audioRecorder.stopRecording()
             val endTimeOffset = System.currentTimeMillis() - sessionStartTime
             
-            processChunkAsync(chunkFile, startTimeOffset, endTimeOffset)
+            processChunkWithGeminiAsync(chunkFile, startTimeOffset, endTimeOffset)
             
-            if (isRecordingSession && !isSongSkippedMode) {
+            if (isRecordingSession && !isSongSkippedMode && !isPausedMode) {
                 startChunkCycle()
             }
         }, 12000)
     }
 
-    private fun processChunkAsync(file: File, start: Long, end: Long) {
-        // Runs the API networking calls inside a safe background worker thread (Dispatchers.IO)
+    private fun processChunkWithGeminiAsync(file: File, start: Long, end: Long) {
         scope.launch(Dispatchers.IO) {
             try {
-                val originalText = groqClient.transcribeAudio(file)
+                // One single structural request yields both values instantly!
+                val result = geminiClient.processAudio(file, targetLang)
+                val originalText = result.first
+                val translatedText = result.second
+
                 if (originalText.isNotBlank()) {
-                    val translatedText = groqClient.translateText(originalText, targetLang)
                     val entry = TranscriptEntry(start, end, originalText, translatedText)
                     SessionData.entries.add(entry)
                     
-                    // Jumps back to the Main thread to update UI views safely
                     launch(Dispatchers.Main) {
                         tvLog.append("\nID: $originalText\n$targetLang: $translatedText\n—")
                     }
