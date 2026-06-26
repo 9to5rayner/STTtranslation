@@ -27,7 +27,16 @@ jobs:
         ./gradle-8.11.1/bin/gradle wrapper --gradle-version 8.11.1
         sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.11.1-bin.zip|' gradle/wrapper/gradle-wrapper.properties
         chmod +x gradlew
-        cat gradle/wrapper/gradle-wrapper.properties
+
+    - name: Generate placeholder launcher icons
+      run: |
+        for dpi in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+          mkdir -p app/src/main/res/mipmap-${dpi}
+          convert -size 48x48 xc:#4CAF50 \
+            app/src/main/res/mipmap-${dpi}/ic_launcher.png
+          cp app/src/main/res/mipmap-${dpi}/ic_launcher.png \
+            app/src/main/res/mipmap-${dpi}/ic_launcher_round.png
+        done
 
     - name: Build Debug APK
       run: ./gradlew assembleDebug --stacktrace
