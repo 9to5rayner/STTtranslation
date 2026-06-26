@@ -30,13 +30,35 @@ jobs:
 
     - name: Generate placeholder launcher icons
       run: |
-        for dpi in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-          mkdir -p app/src/main/res/mipmap-${dpi}
-          convert -size 48x48 xc:#4CAF50 \
-            app/src/main/res/mipmap-${dpi}/ic_launcher.png
-          cp app/src/main/res/mipmap-${dpi}/ic_launcher.png \
-            app/src/main/res/mipmap-${dpi}/ic_launcher_round.png
-        done
+        python3 - <<'EOF'
+        import struct, zlib, os
+
+        def make_png(size, color):
+            def chunk(name, data):
+                c = struct.pack('>I', len(data)) + name + data
+                return c + struct.pack('>I', zlib.crc32(c[4:]) & 0xffffffff)
+            
+            r, g, b = color
+            raw = b''
+            for _ in range(size):
+                row = b'\x00' + bytes([r, g, b] * size)
+                raw += row
+            
+            sig = b'\x89PNG\r\n\x1a\n'
+            ihdr = struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)
+            idat = zlib.compress(raw)
+            
+            return sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND', b'')
+
+        png = make_png(48, (76, 175, 80))
+        for dpi in ['mdpi','hdpi','xhdpi','xxhdpi','xxxhdpi']:
+            path = f'app/src/main/res/mipmap-{dpi}'
+            os.makedirs(path, exist_ok=True)
+            for name in ['ic_launcher.png', 'ic_launcher_round.png']:
+                with open(f'{path}/{name}', 'wb') as f:
+                    f.write(png)
+        print("Icons generated!")
+        EOF
 
     - name: Build Debug APK
       run: ./gradlew assembleDebug --stacktrace
