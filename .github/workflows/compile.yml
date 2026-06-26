@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # Uses the latest v4 to stay completely compatible with Node 24+
     - name: Checkout Code
       uses: actions/checkout@v4
 
@@ -21,13 +20,16 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
+    # This magic step builds a fresh, uncorrupted Gradle Wrapper engine directly on the server
+    - name: Generate Gradle Wrapper Engine
+      run: jar cfe gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain -C . . || gradle wrapper --gradle-version 8.2.2
+
     - name: Fix line endings and permissions for gradlew
       run: |
         sudo apt-get install -y dos2unix
         dos2unix gradlew
         chmod +x gradlew
 
-# Change this line inside your compile.yml file:
     - name: Build Debug APK
       run: ./gradlew assembleDebug --stacktrace
 
