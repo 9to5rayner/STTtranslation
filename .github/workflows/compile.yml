@@ -20,14 +20,11 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # This magic step builds a fresh, uncorrupted Gradle Wrapper engine directly on the server
-    - name: Generate Gradle Wrapper Engine
-      run: jar cfe gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain -C . . || gradle wrapper --gradle-version 8.2.2
-
-    - name: Fix line endings and permissions for gradlew
+    - name: Bootstrap Gradle 8.2.2 & Generate Wrapper
       run: |
-        sudo apt-get install -y dos2unix
-        dos2unix gradlew
+        curl -L https://services.gradle.org/distributions/gradle-8.2.2-bin.zip -o gradle.zip
+        unzip -q gradle.zip
+        ./gradle-8.2.2/bin/gradle wrapper --gradle-version 8.2.2
         chmod +x gradlew
 
     - name: Build Debug APK
