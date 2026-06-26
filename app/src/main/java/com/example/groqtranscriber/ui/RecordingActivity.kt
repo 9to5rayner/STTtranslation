@@ -10,9 +10,8 @@ import android.os.Looper
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
-// Replace line 13:
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.core.ActivityCompat
 import com.example.groqtranscriber.R
 import com.example.groqtranscriber.audio.AudioRecorder
 import com.example.groqtranscriber.audio.AudioChunker
@@ -29,11 +28,11 @@ class RecordingActivity : AppCompatActivity() {
     private lateinit var audioChunker: AudioChunker
     private lateinit var geminiClient: GeminiClient
     private lateinit var targetLang: String
-    
+
     private var isRecordingSession = true
     private var isSongSkippedMode = false
     private var isPausedMode = false
-    
+
     private var chunkIndex = 0
     private var sessionStartTime = 0L
     private var pauseAccumulatedTime = 0L
@@ -41,7 +40,7 @@ class RecordingActivity : AppCompatActivity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(Dispatchers.Main)
-    
+
     private lateinit var tvStatus: TextView
     private lateinit var tvLog: TextView
 
@@ -57,8 +56,7 @@ class RecordingActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("api_key", "") ?: ""
-        
-        // Swapped to Gemini Engine
+
         geminiClient = GeminiClient(apiKey)
         audioRecorder = AudioRecorder(this)
         audioChunker = AudioChunker(this)
@@ -73,17 +71,14 @@ class RecordingActivity : AppCompatActivity() {
             startChunkCycle()
         }
 
-        // Pause Button Logic
         btnPause.setOnClickListener {
             if (!isRecordingSession || isSongSkippedMode) return@setOnClickListener
-            
             isPausedMode = !isPausedMode
             if (isPausedMode) {
                 btnPause.text = "Resume Session"
                 tvStatus.text = "⏸️ Session Paused"
                 audioRecorder.stopRecording()
                 handler.removeCallbacksAndMessages(null)
-                // Track how much time passed in the partial chunk before hitting pause
                 pauseAccumulatedTime += System.currentTimeMillis() - currentChunkStartTime
             } else {
                 btnPause.text = "Pause Session"
@@ -92,7 +87,6 @@ class RecordingActivity : AppCompatActivity() {
             }
         }
 
-        // Skip Song Logic
         btnSkip.setOnClickListener {
             if (isPausedMode) return@setOnClickListener
             isSongSkippedMode = !isSongSkippedMode
@@ -112,7 +106,6 @@ class RecordingActivity : AppCompatActivity() {
             isRecordingSession = false
             handler.removeCallbacksAndMessages(null)
             audioRecorder.stopRecording()
-            
             val intent = Intent(this, ExportActivity::class.java).apply {
                 putExtra("TARGET_LANG", targetLang)
             }
@@ -127,15 +120,13 @@ class RecordingActivity : AppCompatActivity() {
         currentChunkStartTime = System.currentTimeMillis()
         val startTimeOffset = currentChunkStartTime - sessionStartTime
         val chunkFile = audioChunker.createChunkFile(chunkIndex++)
-        
+
         audioRecorder.startRecording(chunkFile)
 
         handler.postDelayed({
             audioRecorder.stopRecording()
             val endTimeOffset = System.currentTimeMillis() - sessionStartTime
-            
             processChunkWithGeminiAsync(chunkFile, startTimeOffset, endTimeOffset)
-            
             if (isRecordingSession && !isSongSkippedMode && !isPausedMode) {
                 startChunkCycle()
             }
@@ -145,15 +136,12 @@ class RecordingActivity : AppCompatActivity() {
     private fun processChunkWithGeminiAsync(file: File, start: Long, end: Long) {
         scope.launch(Dispatchers.IO) {
             try {
-                // One single structural request yields both values instantly!
                 val result = geminiClient.processAudio(file, targetLang)
                 val originalText = result.first
                 val translatedText = result.second
-
                 if (originalText.isNotBlank()) {
                     val entry = TranscriptEntry(start, end, originalText, translatedText)
                     SessionData.entries.add(entry)
-                    
                     launch(Dispatchers.Main) {
                         tvLog.append("\nID: $originalText\n$targetLang: $translatedText\n—")
                     }
