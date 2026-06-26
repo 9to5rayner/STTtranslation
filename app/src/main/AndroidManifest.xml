@@ -10,8 +10,8 @@
         android:label="Groq Transcriber"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.GroqTranscriber"
-        
+        android:theme="@style/Theme.GroqTranscriber">
+
         <activity
             android:name=".ui.LaunchActivity"
             android:exported="true">
@@ -20,7 +20,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        
+
         <activity android:name=".ui.RecordingActivity" android:exported="false" />
         <activity android:name=".ui.ExportActivity" android:exported="false" />
 
@@ -33,5 +33,7 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
     </application>
+
 </manifest>
