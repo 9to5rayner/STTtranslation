@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_size"
-    android:layout_height="match_size"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
     android:orientation="vertical"
     android:padding="16dp">
-    <TextView android:id="@+id/tvStatus" android:layout_width="match_size" android:layout_height="wrap_content" android:text="Recording active..." android:textSize="18sp"/>
-    <Button android:id="@+id/btnSkip" android:layout_width="match_size" android:layout_height="wrap_content" android:text="Skip Song"/>
-    <Button android:id="@+id/btnEnd" android:layout_width="match_size" android:layout_height="wrap_content" android:text="End Session"/>
-    <ScrollView android:layout_width="match_size" android:layout_height="0dp" android:layout_weight="1">
-        <TextView android:id="@+id/tvLog" android:layout_width="match_size" android:layout_height="wrap_content" android:text="Live Transcript Log:"/>
+    <TextView android:id="@+id/tvStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Recording active..." android:textSize="18sp"/>
+    <Button android:id="@+id/btnSkip" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Skip Song"/>
+    <Button android:id="@+id/btnEnd" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="End Session"/>
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <TextView android:id="@+id/tvLog" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Live Transcript Log:"/>
     </ScrollView>
 </LinearLayout>

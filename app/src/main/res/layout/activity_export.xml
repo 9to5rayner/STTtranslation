@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_size"
-    android:layout_height="match_size"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
     android:orientation="vertical"
     android:padding="16dp">
-    <ScrollView android:layout_width="match_size" android:layout_height="0dp" android:layout_weight="1">
-        <TextView android:id="@+id/tvPreview" android:layout_width="match_size" android:layout_height="wrap_content" android:text="Session Preview"/>
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <TextView android:id="@+id/tvPreview" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Session Preview"/>
     </ScrollView>
-    <Button android:id="@+id/btnShareTxt" android:layout_width="match_size" android:layout_height="wrap_content" android:text="Share as TXT"/>
-    <Button android:id="@+id/btnShareSrt" android:layout_width="match_size" android:layout_height="wrap_content" android:text="Share as SRT"/>
-    <Button android:id="@+id/btnCopy" android:layout_width="match_size" android:layout_height="wrap_content" android:text="Copy to Clipboard"/>
+    <Button android:id="@+id/btnShareTxt" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Share as TXT"/>
+    <Button android:id="@+id/btnShareSrt" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Share as SRT"/>
+    <Button android:id="@+id/btnCopy" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Copy to Clipboard"/>
 </LinearLayout>

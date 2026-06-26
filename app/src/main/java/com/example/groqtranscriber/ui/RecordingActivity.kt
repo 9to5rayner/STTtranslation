@@ -58,17 +58,18 @@ class RecordingActivity : AppCompatActivity() {
         audioChunker = AudioChunker(this)
         targetLang = intent.getStringExtra("TARGET_LANG") ?: "English"
 
-        // Clear previous session runs
+        // Clear out any old transcripts from previous sessions
         SessionData.clear()
         sessionStartTime = System.currentTimeMillis()
 
-        // Explicit micro runtime check
+        // Request runtime microphone permission if not granted yet
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 200)
         } else {
             startChunkCycle()
         }
 
+        // Skip Song Pause/Resume logic
         btnSkip.setOnClickListener {
             isSongSkippedMode = !isSongSkippedMode
             if (isSongSkippedMode) {
@@ -83,6 +84,7 @@ class RecordingActivity : AppCompatActivity() {
             }
         }
 
+        // End Session and transition to the Export Screen
         btnEnd.setOnClickListener {
             isRecordingSession = false
             handler.removeCallbacksAndMessages(null)
@@ -105,6 +107,7 @@ class RecordingActivity : AppCompatActivity() {
         
         audioRecorder.startRecording(chunkFile)
 
+        // Automatically cut the file and swap streams every 12 seconds
         handler.postDelayed({
             audioRecorder.stopRecording()
             val endTimeOffset = System.currentTimeMillis() - sessionStartTime
@@ -114,10 +117,11 @@ class RecordingActivity : AppCompatActivity() {
             if (isRecordingSession && !isSongSkippedMode) {
                 startChunkCycle()
             }
-        }, 12000) // 12-second intervals
+        }, 12000)
     }
 
     private fun processChunkAsync(file: File, start: Long, end: Long) {
+        // Runs the API networking calls inside a safe background worker thread (Dispatchers.IO)
         scope.launch(Dispatchers.IO) {
             try {
                 val originalText = groqClient.transcribeAudio(file)
@@ -126,12 +130,13 @@ class RecordingActivity : AppCompatActivity() {
                     val entry = TranscriptEntry(start, end, originalText, translatedText)
                     SessionData.entries.add(entry)
                     
+                    // Jumps back to the Main thread to update UI views safely
                     launch(Dispatchers.Main) {
                         tvLog.append("\nID: $originalText\n$targetLang: $translatedText\n—")
                     }
                 }
             } catch (e: Exception) {
-                e.provider()
+                e.printStackTrace()
             } finally {
                 audioChunker.safelyDeleteChunk(file)
             }
