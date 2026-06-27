@@ -28,10 +28,215 @@ jobs:
         sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.11.1-bin.zip|' gradle/wrapper/gradle-wrapper.properties
         chmod +x gradlew
 
-    - name: Strip BOM from XML and source files
+    - name: Write layout XML files (guaranteed clean UTF-8, no BOM)
       run: |
-        find app/src/main/res -name "*.xml" | xargs sed -i 's/^\xEF\xBB\xBF//'
-        find app/src/main/java -name "*.kt"  | xargs sed -i 's/^\xEF\xBB\xBF//'
+        python3 - <<'EOF'
+        import os
+
+        files = {}
+
+        files['app/src/main/res/layout/activity_recording.xml'] = (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"\n'
+            '    android:layout_width="match_parent"\n'
+            '    android:layout_height="match_parent"\n'
+            '    android:orientation="vertical"\n'
+            '    android:padding="16dp">\n'
+            '\n'
+            '    <TextView\n'
+            '        android:id="@+id/tvStatus"\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:text="Recording active..."\n'
+            '        android:textSize="18sp"\n'
+            '        android:textStyle="bold"\n'
+            '        android:gravity="center"\n'
+            '        android:layout_marginBottom="16dp"/>\n'
+            '\n'
+            '    <LinearLayout\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:orientation="horizontal"\n'
+            '        android:weightSum="2"\n'
+            '        android:layout_marginBottom="10dp">\n'
+            '\n'
+            '        <Button\n'
+            '            android:id="@+id/btnPause"\n'
+            '            android:layout_width="0dp"\n'
+            '            android:layout_height="wrap_content"\n'
+            '            android:layout_weight="1"\n'
+            '            android:layout_marginEnd="4dp"\n'
+            '            android:text="Pause Session"/>\n'
+            '\n'
+            '        <Button\n'
+            '            android:id="@+id/btnSkip"\n'
+            '            android:layout_width="0dp"\n'
+            '            android:layout_height="wrap_content"\n'
+            '            android:layout_weight="1"\n'
+            '            android:layout_marginStart="4dp"\n'
+            '            android:text="Skip Song"/>\n'
+            '    </LinearLayout>\n'
+            '\n'
+            '    <Button\n'
+            '        android:id="@+id/btnEnd"\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:backgroundTint="#FF3B30"\n'
+            '        android:text="End Session"\n'
+            '        android:layout_marginBottom="16dp"/>\n'
+            '\n'
+            '    <ScrollView\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="0dp"\n'
+            '        android:layout_weight="1"\n'
+            '        android:background="#F2F2F7"\n'
+            '        android:padding="8dp">\n'
+            '        <TextView\n'
+            '            android:id="@+id/tvLog"\n'
+            '            android:layout_width="match_parent"\n'
+            '            android:layout_height="wrap_content"\n'
+            '            android:text="Live Transcript Log:"\n'
+            '            android:textColor="#1C1C1E"/>\n'
+            '    </ScrollView>\n'
+            '</LinearLayout>\n'
+        )
+
+        files['app/src/main/res/layout/activity_export.xml'] = (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"\n'
+            '    android:layout_width="match_parent"\n'
+            '    android:layout_height="match_parent"\n'
+            '    android:orientation="vertical"\n'
+            '    android:padding="16dp">\n'
+            '\n'
+            '    <TextView\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:text="Session Transcript"\n'
+            '        android:textSize="18sp"\n'
+            '        android:textStyle="bold"\n'
+            '        android:layout_marginBottom="4dp"/>\n'
+            '\n'
+            '    <TextView\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:text="Tap any entry to edit transcription and re-translate."\n'
+            '        android:textSize="12sp"\n'
+            '        android:textColor="#888888"\n'
+            '        android:layout_marginBottom="8dp"/>\n'
+            '\n'
+            '    <ScrollView\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="0dp"\n'
+            '        android:layout_weight="1"\n'
+            '        android:background="#F2F2F7"\n'
+            '        android:padding="4dp">\n'
+            '\n'
+            '        <LinearLayout\n'
+            '            android:id="@+id/llEntriesContainer"\n'
+            '            android:layout_width="match_parent"\n'
+            '            android:layout_height="wrap_content"\n'
+            '            android:orientation="vertical"\n'
+            '            android:padding="4dp"/>\n'
+            '    </ScrollView>\n'
+            '\n'
+            '    <Button\n'
+            '        android:id="@+id/btnShareTxt"\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:layout_marginTop="8dp"\n'
+            '        android:text="Share as TXT"/>\n'
+            '\n'
+            '    <Button\n'
+            '        android:id="@+id/btnShareSrt"\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:text="Share as SRT"/>\n'
+            '\n'
+            '    <Button\n'
+            '        android:id="@+id/btnCopy"\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:text="Copy to Clipboard"/>\n'
+            '\n'
+            '</LinearLayout>\n'
+        )
+
+        files['app/src/main/res/layout/item_transcript_entry.xml'] = (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"\n'
+            '    android:layout_width="match_parent"\n'
+            '    android:layout_height="wrap_content"\n'
+            '    android:orientation="vertical"\n'
+            '    android:background="@android:color/white"\n'
+            '    android:padding="10dp"\n'
+            '    android:layout_marginBottom="6dp"\n'
+            '    android:elevation="2dp">\n'
+            '\n'
+            '    <LinearLayout\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:orientation="horizontal">\n'
+            '\n'
+            '        <TextView\n'
+            '            android:id="@+id/tvTimestamp"\n'
+            '            android:layout_width="0dp"\n'
+            '            android:layout_height="wrap_content"\n'
+            '            android:layout_weight="1"\n'
+            '            android:textSize="11sp"\n'
+            '            android:textColor="#999999"/>\n'
+            '\n'
+            '        <TextView\n'
+            '            android:id="@+id/tvEditHint"\n'
+            '            android:layout_width="wrap_content"\n'
+            '            android:layout_height="wrap_content"\n'
+            '            android:text="tap to edit"\n'
+            '            android:textSize="11sp"\n'
+            '            android:textColor="#6200EE"/>\n'
+            '    </LinearLayout>\n'
+            '\n'
+            '    <TextView\n'
+            '        android:id="@+id/tvOriginal"\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:textSize="14sp"\n'
+            '        android:textStyle="bold"\n'
+            '        android:textColor="#1C1C1E"\n'
+            '        android:layout_marginTop="4dp"/>\n'
+            '\n'
+            '    <TextView\n'
+            '        android:id="@+id/tvTranslation"\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:textSize="13sp"\n'
+            '        android:textColor="#3A3A3C"\n'
+            '        android:layout_marginTop="2dp"/>\n'
+            '\n'
+            '    <TextView\n'
+            '        android:id="@+id/tvRetranslating"\n'
+            '        android:layout_width="match_parent"\n'
+            '        android:layout_height="wrap_content"\n'
+            '        android:text="Re-translating..."\n'
+            '        android:textSize="12sp"\n'
+            '        android:textColor="#888888"\n'
+            '        android:visibility="gone"\n'
+            '        android:layout_marginTop="4dp"/>\n'
+            '\n'
+            '</LinearLayout>\n'
+        )
+
+        for path, content in files.items():
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(content)
+            # Verify no BOM was written
+            with open(path, 'rb') as f:
+                first3 = f.read(3)
+            assert first3 == b'<?x', f"Bad start bytes in {path}: {first3.hex()}"
+            print(f"OK: {path}")
+
+        print("All layout files written cleanly.")
+        EOF
 
     - name: Generate placeholder launcher icons
       run: |
@@ -42,17 +247,14 @@ jobs:
             def chunk(name, data):
                 c = struct.pack('>I', len(data)) + name + data
                 return c + struct.pack('>I', zlib.crc32(c[4:]) & 0xffffffff)
-            
             r, g, b = color
             raw = b''
             for _ in range(size):
                 row = b'\x00' + bytes([r, g, b] * size)
                 raw += row
-            
             sig = b'\x89PNG\r\n\x1a\n'
             ihdr = struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)
             idat = zlib.compress(raw)
-            
             return sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND', b'')
 
         png = make_png(48, (76, 175, 80))
