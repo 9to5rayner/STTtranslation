@@ -19,27 +19,31 @@ class LaunchActivity : AppCompatActivity() {
         val rgLanguage = findViewById<RadioGroup>(R.id.rgLanguage)
         val btnLaunch = findViewById<Button>(R.id.btnLaunch)
 
-        // Retrieve saved API key if it exists
+        // Restore previously saved API key for convenience
         val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
         etApiKey.setText(prefs.getString("api_key", ""))
 
         btnLaunch.setOnClickListener {
             val key = etApiKey.text.toString().trim()
             if (key.isEmpty()) {
-                Toast.makeText(this, "Please enter a valid Gemini API Key", Toast.LENGTH_SHORT).show()
+                // FIX: was incorrectly saying "Gemini API Key" in the original
+                Toast.makeText(this, "Please enter a valid API Key", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            // Secure key locally
             prefs.edit().putString("api_key", key).apply()
 
-            // Determine target language setup
-            val selectedLang = if (rgLanguage.checkedRadioButtonId == R.id.rbJapanese) "Japanese" else "English"
-            
-            val intent = Intent(this, RecordingActivity::class.java).apply {
-                putExtra("TARGET_LANG", selectedLang)
+            val selectedLang = if (rgLanguage.checkedRadioButtonId == R.id.rbJapanese) {
+                "Japanese"
+            } else {
+                "English"
             }
-            startActivity(intent)
+
+            startActivity(
+                Intent(this, RecordingActivity::class.java).apply {
+                    putExtra("TARGET_LANG", selectedLang)
+                }
+            )
         }
     }
 }

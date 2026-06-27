@@ -1,94 +1,49 @@
-package com.example.groqtranscriber.api
+package com.example.groqtranscriber.ui
 
-import android.util.Base64
-import com.google.gson.JsonArray
-import com.google.gson.JsonObject
-import com.google.gson.JsonParser
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.File
-import java.io.IOException
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.suspendCancellableCoroutine
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import android.widget.Button
+import android.widget.EditText
+import android.widget.RadioGroup
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import com.example.groqtranscriber.R
 
-class GeminiClient(private val apiKey: String) {
-    private val client = OkHttpClient()
-    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+class LaunchActivity : AppCompatActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_launch)
 
-    suspend fun processAudio(file: File, targetLanguage: String): Pair<String, String> = suspendCancellableCoroutine { continuation ->
-        try {
-            val audioBytes = file.readBytes()
-            val base64Audio = Base64.encodeToString(audioBytes, Base64.NO_WRAP)
+        val etApiKey = findViewById<EditText>(R.id.etApiKey)
+        val rgLanguage = findViewById<RadioGroup>(R.id.rgLanguage)
+        val btnLaunch = findViewById<Button>(R.id.btnLaunch)
 
-            val promptText = """
-                You are a precise subtitle assistant. Analyze this Indonesian audio clip.
-                Output a valid JSON format with exactly two keys: "original" and "translation".
-                In "original", transcribe the Indonesian speech exactly.
-                In "translation", translate that transcription into $targetLanguage.
-                Return ONLY the raw JSON string payload. Do not include markdown code block styling like ```json.
-            """.trimIndent()
+        // Restore previously saved API key for convenience
+        val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
+        etApiKey.setText(prefs.getString("api_key", ""))
 
-            val root = JsonObject()
-            val contents = JsonArray()
-            val contentItem = JsonObject()
-            val parts = JsonArray()
-
-            val textPart = JsonObject().apply { addProperty("text", promptText) }
-            parts.add(textPart)
-
-            val audioPart = JsonObject()
-            val inlineData = JsonObject().apply {
-                addProperty("mimeType", "audio/mp4")
-                addProperty("data", base64Audio)
+        btnLaunch.setOnClickListener {
+            val key = etApiKey.text.toString().trim()
+            if (key.isEmpty()) {
+                // FIX: was incorrectly saying "Gemini API Key" in the original
+                Toast.makeText(this, "Please enter a valid API Key", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
-            audioPart.add("inlineData", inlineData)
-            parts.add(audioPart)
 
-            contentItem.add("parts", parts)
-            contents.add(contentItem)
-            root.add("contents", contents)
+            prefs.edit().putString("api_key", key).apply()
 
-            val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
-                .post(root.toString().toRequestBody(jsonMediaType))
-                .build()
+            val selectedLang = if (rgLanguage.checkedRadioButtonId == R.id.rbJapanese) {
+                "Japanese"
+            } else {
+                "English"
+            }
 
-            client.newCall(request).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    continuation.resumeWithException(e)
+            startActivity(
+                Intent(this, RecordingActivity::class.java).apply {
+                    putExtra("TARGET_LANG", selectedLang)
                 }
-
-                override fun onResponse(call: Call, response: Response) {
-                    response.use { res ->
-                        if (!res.isSuccessful) {
-                            continuation.resumeWithException(IOException("Gemini API Error Code: ${res.code}"))
-                            return
-                        }
-                        try {
-                            val responseBody = res.body?.string() ?: ""
-                            val jsonResponse = JsonParser.parseString(responseBody).asJsonObject
-                            val outputText = jsonResponse.getAsJsonArray("candidates")
-                                .get(0).asJsonObject
-                                .getAsJsonObject("content")
-                                .getAsJsonArray("parts")
-                                .get(0).asJsonObject
-                                .get("text").asString.trim()
-
-                            val parsedOutput = JsonParser.parseString(outputText).asJsonObject
-                            val original = parsedOutput.get("original").asString
-                            val translation = parsedOutput.get("translation").asString
-
-                            continuation.resume(Pair(original, translation))
-                        } catch (e: Exception) {
-                            continuation.resumeWithException(e)
-                        }
-                    }
-                }
-            })
-        } catch (e: Exception) {
-            continuation.resumeWithException(e)
+            )
         }
     }
 }

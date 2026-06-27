@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@android:color/white"
+    android:padding="10dp"
+    android:layout_marginBottom="6dp"
+    android:elevation="2dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvTimestamp"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="11sp"
+            android:textColor="#999999"/>
+
+        <TextView
+            android:id="@+id/tvEditHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="✏️ tap to edit"
+            android:textSize="11sp"
+            android:textColor="#6200EE"/>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvOriginal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="#1C1C1E"
+        android:layout_marginTop="4dp"/>
+
+    <TextView
+        android:id="@+id/tvTranslation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="#3A3A3C"
+        android:layout_marginTop="2dp"/>
+
+    <TextView
+        android:id="@+id/tvRetranslating"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🔄 Re-translating..."
+        android:textSize="12sp"
+        android:textColor="#888888"
+        android:visibility="gone"
+        android:layout_marginTop="4dp"/>
+
+</LinearLayout>

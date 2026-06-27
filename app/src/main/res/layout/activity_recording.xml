@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="[http://schemas.android.com/apk/res/android](http://schemas.android.com/apk/res/android)"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:padding="16dp">
 
-    <TextView 
-        android:id="@+id/tvStatus" 
-        android:layout_width="match_parent" 
-        android:layout_height="wrap_content" 
-        android:text="Recording active..." 
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Recording active..."
         android:textSize="18sp"
         android:textStyle="bold"
         android:gravity="center"
@@ -21,42 +21,42 @@
         android:orientation="horizontal"
         android:weightSum="2"
         android:layout_marginBottom="10dp">
-        
-        <Button 
-            android:id="@+id/btnPause" 
-            android:layout_width="0dp" 
-            android:layout_height="wrap_content" 
+
+        <Button
+            android:id="@+id/btnPause"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginRight="4dp"
+            android:layout_marginEnd="4dp"
             android:text="Pause Session"/>
 
-        <Button 
-            android:id="@+id/btnSkip" 
-            android:layout_width="0dp" 
-            android:layout_height="wrap_content" 
+        <Button
+            android:id="@+id/btnSkip"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginLeft="4dp"
+            android:layout_marginStart="4dp"
             android:text="Skip Song"/>
     </LinearLayout>
 
-    <Button 
-        android:id="@+id/btnEnd" 
-        android:layout_width="match_parent" 
-        android:layout_height="wrap_content" 
+    <Button
+        android:id="@+id/btnEnd"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:backgroundTint="#FF3B30"
         android:text="End Session"
         android:layout_marginBottom="16dp"/>
 
-    <ScrollView 
-        android:layout_width="match_parent" 
-        android:layout_height="0dp" 
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
         android:layout_weight="1"
         android:background="#F2F2F7"
         android:padding="8dp">
-        <TextView 
-            android:id="@+id/tvLog" 
-            android:layout_width="match_parent" 
-            android:layout_height="wrap_content" 
+        <TextView
+            android:id="@+id/tvLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:text="Live Transcript Log:"
             android:textColor="#1C1C1E"/>
     </ScrollView>
