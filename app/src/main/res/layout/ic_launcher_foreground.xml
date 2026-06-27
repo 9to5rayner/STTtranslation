@@ -1,0 +1,90 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Background fill is handled by ic_launcher_background.xml -->
+
+    <!-- Open book pages -->
+    <path
+        android:fillColor="#F5E9C4"
+        android:pathData="M54,28 C54,28 36,30 28,35 L28,72 C36,67 54,66 54,66 L54,28Z"/>
+    <path
+        android:fillColor="#EDD99A"
+        android:pathData="M54,28 C54,28 72,30 80,35 L80,72 C72,67 54,66 54,66 L54,28Z"/>
+
+    <!-- Book spine line -->
+    <path
+        android:strokeColor="#C9A84C"
+        android:strokeWidth="2"
+        android:pathData="M54,28 L54,66"
+        android:fillColor="#00000000"/>
+
+    <!-- Text lines on left page -->
+    <path
+        android:strokeColor="#C9A84C"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M33,42 L50,40"
+        android:fillColor="#00000000"/>
+    <path
+        android:strokeColor="#C9A84C"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M33,48 L50,47"
+        android:fillColor="#00000000"/>
+    <path
+        android:strokeColor="#C9A84C"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M33,54 L46,53"
+        android:fillColor="#00000000"/>
+
+    <!-- Text lines on right page -->
+    <path
+        android:strokeColor="#C9A84C"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M58,42 L75,40"
+        android:fillColor="#00000000"/>
+    <path
+        android:strokeColor="#C9A84C"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M58,48 L75,47"
+        android:fillColor="#00000000"/>
+    <path
+        android:strokeColor="#C9A84C"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M58,54 L71,53"
+        android:fillColor="#00000000"/>
+
+    <!-- Audio waveform arc below book (transcription symbol) -->
+    <path
+        android:strokeColor="#E8C96A"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M38,80 Q54,72 70,80"
+        android:fillColor="#00000000"/>
+    <path
+        android:strokeColor="#E8C96A"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M43,76 Q54,70 65,76"
+        android:fillColor="#00000000"/>
+    <path
+        android:strokeColor="#E8C96A"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M48,72 Q54,68 60,72"
+        android:fillColor="#00000000"/>
+
+    <!-- Mic dot at center bottom -->
+    <circle
+        android:fillColor="#C9A84C"
+        android:cx="54"
+        android:cy="83"
+        android:r="3"/>
+</vector>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary palette: deep navy + warm gold, evoking printed scripture and reverence -->
+    <color name="navy_deep">#1A2744</color>
+    <color name="navy_mid">#243258</color>
+    <color name="navy_surface">#2D3E6B</color>
+    <color name="gold_primary">#C9A84C</color>
+    <color name="gold_light">#E8C96A</color>
+    <color name="gold_pale">#F5E9C4</color>
+
+    <!-- Neutrals -->
+    <color name="cream_bg">#F8F5EE</color>
+    <color name="cream_card">#FFFFFF</color>
+    <color name="text_primary">#1A2744</color>
+    <color name="text_secondary">#5A6A8A</color>
+    <color name="text_hint">#9AAAC0</color>
+    <color name="divider">#E4DDD0</color>
+
+    <!-- Status -->
+    <color name="recording_red">#E03B3B</color>
+    <color name="paused_amber">#E09A2B</color>
+    <color name="success_green">#2E7D52</color>
+</resources>
