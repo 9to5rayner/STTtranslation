@@ -28,6 +28,11 @@ jobs:
         sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.11.1-bin.zip|' gradle/wrapper/gradle-wrapper.properties
         chmod +x gradlew
 
+    - name: Strip BOM from XML and source files
+      run: |
+        find app/src/main/res -name "*.xml" | xargs sed -i 's/^\xEF\xBB\xBF//'
+        find app/src/main/java -name "*.kt"  | xargs sed -i 's/^\xEF\xBB\xBF//'
+
     - name: Generate placeholder launcher icons
       run: |
         python3 - <<'EOF'
