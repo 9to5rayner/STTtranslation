@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
@@ -18,60 +19,92 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Renders transcript chunks as chat-style bubbles.
+ *
+ * Two-phase display:
+ *   Phase 1 — Indonesian bubble appears immediately (transcription done).
+ *   Phase 2 — Gold translation bubble slides in when translateText() returns.
+ *
+ * The "Translating…" row is visible between phases so the user knows work
+ * is still happening.
+ */
 class LiveTranscriptAdapter(
     private val context: Context,
     private val targetLang: String,
     private val geminiClient: GeminiClient,
     private val scope: CoroutineScope
-) : RecyclerView.Adapter<LiveTranscriptAdapter.EntryViewHolder>() {
+) : RecyclerView.Adapter<LiveTranscriptAdapter.BubbleViewHolder>() {
 
-    inner class EntryViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val tvTimestamp: TextView = view.findViewById(R.id.tvTimestamp)
-        val tvOriginal: TextView = view.findViewById(R.id.tvOriginal)
-        val tvTranslation: TextView = view.findViewById(R.id.tvTranslation)
-        val tvRetranslating: TextView = view.findViewById(R.id.tvRetranslating)
+    inner class BubbleViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val tvTimestamp: TextView     = view.findViewById(R.id.tvTimestamp)
+        val tvOriginal: TextView      = view.findViewById(R.id.tvOriginal)
+        val llTranslationRow: LinearLayout = view.findViewById(R.id.llTranslationRow)
+        val tvTranslation: TextView   = view.findViewById(R.id.tvTranslation)
+        val llTranslatingRow: LinearLayout = view.findViewById(R.id.llTranslatingRow)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EntryViewHolder {
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): BubbleViewHolder {
         val view = LayoutInflater.from(context)
-            .inflate(R.layout.item_transcript_entry, parent, false)
-        return EntryViewHolder(view)
+            .inflate(R.layout.item_chat_bubble, parent, false)
+        return BubbleViewHolder(view)
     }
 
     override fun getItemCount(): Int = SessionData.entries.size
 
-    override fun onBindViewHolder(holder: EntryViewHolder, position: Int) {
-        val entry = SessionData.entries[position]
-        bindEntry(holder, entry, position)
+    override fun onBindViewHolder(holder: BubbleViewHolder, position: Int) {
+        bindBubble(holder, SessionData.entries[position])
     }
 
-    private fun bindEntry(holder: EntryViewHolder, entry: TranscriptEntry, position: Int) {
-        holder.tvTimestamp.text = formatTimestampRange(entry.timestampStart, entry.timestampEnd)
-        holder.tvOriginal.text = "ID: ${entry.originalText}"
-        holder.tvTranslation.text = "$targetLang: ${entry.translatedText}"
-        holder.tvRetranslating.visibility = View.GONE
-        holder.tvTranslation.visibility = View.VISIBLE
+    private fun bindBubble(holder: BubbleViewHolder, entry: TranscriptEntry) {
+        holder.tvTimestamp.text = formatRange(entry.timestampStart, entry.timestampEnd)
+        holder.tvOriginal.text  = entry.originalText
+
+        when {
+            entry.translatedText.isNotEmpty() -> {
+                // Phase 2 complete — show both bubbles
+                holder.tvTranslation.text          = entry.translatedText
+                holder.llTranslationRow.visibility = View.VISIBLE
+                holder.llTranslatingRow.visibility = View.GONE
+            }
+            entry.isTranslating -> {
+                // Phase 1 done, phase 2 in progress — show spinner row
+                holder.llTranslationRow.visibility = View.GONE
+                holder.llTranslatingRow.visibility = View.VISIBLE
+            }
+            else -> {
+                // Translation not started yet (e.g. entry added before translation kicked off)
+                holder.llTranslationRow.visibility = View.GONE
+                holder.llTranslatingRow.visibility = View.GONE
+            }
+        }
 
         holder.itemView.setOnClickListener {
-            // Use adapterPosition (not the captured position) to survive insertions
-            val currentPos = holder.adapterPosition
-            if (currentPos == RecyclerView.NO_ID.toInt()) return@setOnClickListener
-            showEditDialog(holder, SessionData.entries[currentPos], currentPos)
+            val pos = holder.adapterPosition
+            if (pos == RecyclerView.NO_ID.toInt()) return@setOnClickListener
+            showEditDialog(holder, SessionData.entries[pos], pos)
         }
     }
 
-    private fun showEditDialog(
-        holder: EntryViewHolder,
-        entry: TranscriptEntry,
-        index: Int
-    ) {
+    // ── Called from RecordingActivity after transcription arrives ───────────
+
+    /** Add entry with Indonesian text only; starts translation internally. */
+    fun appendAndTranslate(entry: TranscriptEntry) {
+        SessionData.entries.add(entry)
+        val index = SessionData.entries.size - 1
+        notifyItemInserted(index)
+        kickOffTranslation(index)
+    }
+
+    // ── Edit dialog ─────────────────────────────────────────────────────────
+
+    private fun showEditDialog(holder: BubbleViewHolder, entry: TranscriptEntry, index: Int) {
         val editText = EditText(context).apply {
             setText(entry.originalText)
             setSelection(entry.originalText.length)
             setPadding(32, 16, 32, 16)
             minLines = 2
         }
-
         AlertDialog.Builder(context)
             .setTitle("Edit Transcription")
             .setMessage("Correct errors, then tap Re-Translate.")
@@ -82,62 +115,57 @@ class LiveTranscriptAdapter(
                     Toast.makeText(context, "Transcription cannot be empty.", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                retranslate(holder, index, corrected)
+                applyEdit(holder, index, corrected)
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun retranslate(
-        holder: EntryViewHolder,
-        index: Int,
-        correctedOriginal: String
-    ) {
+    private fun applyEdit(holder: BubbleViewHolder, index: Int, correctedOriginal: String) {
         val current = SessionData.entries[index]
+        // Update model immediately
+        SessionData.entries[index] = current.copy(
+            originalText   = correctedOriginal,
+            translatedText = "",
+            isTranslating  = true
+        )
+        // Optimistic UI
+        holder.tvOriginal.text             = correctedOriginal
+        holder.llTranslationRow.visibility = View.GONE
+        holder.llTranslatingRow.visibility = View.VISIBLE
 
-        // Optimistic UI update
-        holder.tvOriginal.text = "ID: $correctedOriginal"
-        holder.tvTranslation.visibility = View.GONE
-        holder.tvRetranslating.visibility = View.VISIBLE
+        kickOffTranslation(index)
+    }
 
+    // ── Translation worker ───────────────────────────────────────────────────
+
+    private fun kickOffTranslation(index: Int) {
         scope.launch {
             try {
-                val newTranslation = withContext(Dispatchers.IO) {
-                    geminiClient.translateText(correctedOriginal, targetLang)
+                val text = SessionData.entries[index].originalText
+                val translated = withContext(Dispatchers.IO) {
+                    geminiClient.translateText(text, targetLang)
                 }
-                SessionData.entries[index] = TranscriptEntry(
-                    timestampStart = current.timestampStart,
-                    timestampEnd = current.timestampEnd,
-                    originalText = correctedOriginal,
-                    translatedText = newTranslation
+                val current = SessionData.entries[index]
+                SessionData.entries[index] = current.copy(
+                    translatedText = translated,
+                    isTranslating  = false
                 )
-                // Already on Main; update card in-place
-                holder.tvTranslation.text = "$targetLang: $newTranslation"
-                holder.tvTranslation.visibility = View.VISIBLE
-                holder.tvRetranslating.visibility = View.GONE
-
+                notifyItemChanged(index)
             } catch (e: Exception) {
                 e.printStackTrace()
-                holder.tvTranslation.text = "$targetLang: [Translation failed]"
-                holder.tvTranslation.visibility = View.VISIBLE
-                holder.tvRetranslating.visibility = View.GONE
-                Toast.makeText(context, "Re-translation failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                val current = SessionData.entries[index]
+                SessionData.entries[index] = current.copy(
+                    translatedText = "[Translation failed]",
+                    isTranslating  = false
+                )
+                notifyItemChanged(index)
             }
         }
     }
 
-    /** Call from RecordingActivity after a new entry is added to SessionData.entries */
-    fun appendEntry() {
-        notifyItemInserted(SessionData.entries.size - 1)
-    }
-
-    /** Call to refresh a single card after an external edit */
-    fun refreshEntry(index: Int) {
-        notifyItemChanged(index)
-    }
-
-    private fun formatTimestampRange(startMs: Long, endMs: Long): String {
+    private fun formatRange(startMs: Long, endMs: Long): String {
         fun fmt(ms: Long) = "%d:%02d".format(ms / 60000, (ms % 60000) / 1000)
-        return "${fmt(startMs)} → ${fmt(endMs)}"
+        return "🕐 ${fmt(startMs)} → ${fmt(endMs)}"
     }
 }

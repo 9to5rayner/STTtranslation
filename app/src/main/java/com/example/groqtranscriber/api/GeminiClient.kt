@@ -16,14 +16,13 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 /**
  * Handles all LLM API calls.
  *
+ * Speed strategy: transcription and translation are now SEPARATE calls.
+ * The caller shows the Indonesian text immediately after transcribeAudio()
+ * returns, then fires translateText() and updates the UI when that finishes.
+ * This halves perceived latency.
+ *
  * Both Google Gemini (direct) and kie.ai's native Gemini endpoint share the
- * same request/response envelope (contents → parts → inlineData for audio,
- * candidates → content → parts → text for output). The only differences are:
- *
- *  - The URL (carried by [ApiProvider.baseUrl])
- *  - Auth style: Google uses ?key=… query param; kie.ai uses Bearer token header
- *
- * This class handles both transparently via the [provider] parameter.
+ * same request/response envelope, so only the URL + auth header differ.
  */
 class GeminiClient(
     private val apiKey: String,
@@ -33,11 +32,6 @@ class GeminiClient(
     private val client = OkHttpClient()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    /**
-     * Builds the final request URL.
-     * - Google: appends ?key= to the base URL
-     * - kie.ai: uses the base URL as-is (auth goes in header)
-     */
     private val apiUrl: String
         get() = if (provider.useBearerAuth) {
             provider.baseUrl
@@ -45,13 +39,8 @@ class GeminiClient(
             "${provider.baseUrl}?key=$apiKey"
         }
 
-    /**
-     * Builds an OkHttp Request with the correct auth style for the active provider.
-     */
     private fun buildRequest(body: RequestBody): Request {
-        val builder = Request.Builder()
-            .url(apiUrl)
-            .post(body)
+        val builder = Request.Builder().url(apiUrl).post(body)
         if (provider.useBearerAuth) {
             builder.addHeader("Authorization", "Bearer $apiKey")
         }
@@ -59,28 +48,18 @@ class GeminiClient(
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Public API
+    // Step 1 — STT only. Returns raw Indonesian transcription.
+    //          Show this in the UI immediately while translation runs.
     // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Sends an audio file to the model for STT + translation in one shot.
-     * Audio is encoded as base64 inline data — works with both Google and kie.ai
-     * native Gemini endpoints.
-     *
-     * @return Pair(originalIndonesian, translatedText)
-     */
-    suspend fun processAudio(file: File, targetLanguage: String): Pair<String, String> =
+    suspend fun transcribeAudio(file: File): String =
         suspendCancellableCoroutine { continuation ->
             try {
-                val audioBytes = file.readBytes()
-                val base64Audio = Base64.encodeToString(audioBytes, Base64.NO_WRAP)
+                val base64Audio = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
 
                 val promptText = """
-                    You are a precise subtitle assistant. Analyze this Indonesian audio clip.
-                    Output a valid JSON object with exactly two keys: "original" and "translation".
-                    In "original", transcribe the Indonesian speech exactly as spoken.
-                    In "translation", translate that transcription into $targetLanguage.
-                    Return ONLY the raw JSON string. Do not use markdown code blocks or backticks.
+                    Transcribe the Indonesian speech in this audio clip exactly as spoken.
+                    Return ONLY the raw transcription text — no labels, no JSON, no markdown,
+                    no explanations. If there is no speech, return an empty string.
                 """.trimIndent()
 
                 val parts = JsonArray().apply {
@@ -93,8 +72,9 @@ class GeminiClient(
                     })
                 }
 
-                val requestBody = buildGeminiBody(parts)
-                val request = buildRequest(requestBody.toString().toRequestBody(jsonMediaType))
+                val request = buildRequest(
+                    buildGeminiBody(parts).toString().toRequestBody(jsonMediaType)
+                )
 
                 client.newCall(request).enqueue(object : Callback {
                     override fun onFailure(call: Call, e: IOException) =
@@ -104,16 +84,14 @@ class GeminiClient(
                         response.use { res ->
                             if (!res.isSuccessful) {
                                 continuation.resumeWithException(
-                                    IOException("${provider.displayName} API Error ${res.code}: ${res.body?.string()}")
+                                    IOException("${provider.displayName} STT error ${res.code}: ${res.body?.string()}")
                                 )
                                 return
                             }
                             try {
-                                val outputText = extractTextFromResponse(res.body?.string() ?: "")
-                                val parsed = JsonParser.parseString(outputText).asJsonObject
-                                val original = parsed.get("original").asString
-                                val translation = parsed.get("translation").asString
-                                continuation.resume(Pair(original, translation))
+                                continuation.resume(
+                                    extractTextFromResponse(res.body?.string() ?: "").trim()
+                                )
                             } catch (e: Exception) {
                                 continuation.resumeWithException(e)
                             }
@@ -125,10 +103,10 @@ class GeminiClient(
             }
         }
 
-    /**
-     * Translates a plain text string (already-transcribed Indonesian) into the target language.
-     * Used by the edit + re-translate feature in ExportActivity — no audio involved.
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    // Step 2 — Translation only. Takes plain text, returns translated text.
+    //          Used after transcribeAudio() and in the edit/re-translate flow.
+    // ─────────────────────────────────────────────────────────────────────────
     suspend fun translateText(indonesianText: String, targetLanguage: String): String =
         suspendCancellableCoroutine { continuation ->
             try {
@@ -144,8 +122,9 @@ class GeminiClient(
                     add(JsonObject().apply { addProperty("text", promptText) })
                 }
 
-                val requestBody = buildGeminiBody(parts)
-                val request = buildRequest(requestBody.toString().toRequestBody(jsonMediaType))
+                val request = buildRequest(
+                    buildGeminiBody(parts).toString().toRequestBody(jsonMediaType)
+                )
 
                 client.newCall(request).enqueue(object : Callback {
                     override fun onFailure(call: Call, e: IOException) =
@@ -155,13 +134,14 @@ class GeminiClient(
                         response.use { res ->
                             if (!res.isSuccessful) {
                                 continuation.resumeWithException(
-                                    IOException("${provider.displayName} API Error ${res.code}: ${res.body?.string()}")
+                                    IOException("${provider.displayName} translate error ${res.code}: ${res.body?.string()}")
                                 )
                                 return
                             }
                             try {
-                                val translation = extractTextFromResponse(res.body?.string() ?: "")
-                                continuation.resume(translation.trim())
+                                continuation.resume(
+                                    extractTextFromResponse(res.body?.string() ?: "").trim()
+                                )
                             } catch (e: Exception) {
                                 continuation.resumeWithException(e)
                             }
@@ -177,20 +157,12 @@ class GeminiClient(
     // Private helpers
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Wraps a parts array in the standard Gemini request envelope.
-     * Identical for Google and kie.ai native Gemini format.
-     */
     private fun buildGeminiBody(parts: JsonArray): JsonObject = JsonObject().apply {
         add("contents", JsonArray().apply {
             add(JsonObject().apply { add("parts", parts) })
         })
     }
 
-    /**
-     * Extracts the text content from a Gemini-format response.
-     * Works for both Google's direct API and kie.ai's native Gemini endpoint.
-     */
     private fun extractTextFromResponse(responseBody: String): String {
         val json = JsonParser.parseString(responseBody).asJsonObject
         return json.getAsJsonArray("candidates")
