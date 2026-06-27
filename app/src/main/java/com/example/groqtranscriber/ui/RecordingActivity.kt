@@ -12,9 +12,11 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.example.groqtranscriber.R
-import com.example.groqtranscriber.audio.AudioRecorder
 import com.example.groqtranscriber.audio.AudioChunker
+import com.example.groqtranscriber.audio.AudioRecorder
 import com.example.groqtranscriber.api.GeminiClient
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.TranscriptEntry
@@ -26,6 +28,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 class RecordingActivity : AppCompatActivity() {
+
     private lateinit var audioRecorder: AudioRecorder
     private lateinit var audioChunker: AudioChunker
     private lateinit var geminiClient: GeminiClient
@@ -39,24 +42,23 @@ class RecordingActivity : AppCompatActivity() {
     private var sessionStartTime = 0L
     private var currentChunkStartTime = 0L
 
-    // SupervisorJob ensures one failed chunk doesn't cancel sibling coroutines
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val handler = Handler(Looper.getMainLooper())
 
     private lateinit var tvStatus: TextView
-    private lateinit var tvLog: TextView
     private lateinit var btnPause: Button
     private lateinit var btnSkip: Button
-
-    private val handler = Handler(Looper.getMainLooper())
+    private lateinit var rvTranscriptLog: RecyclerView
+    private lateinit var transcriptAdapter: LiveTranscriptAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_recording)
 
         tvStatus = findViewById(R.id.tvStatus)
-        tvLog = findViewById(R.id.tvLog)
         btnPause = findViewById(R.id.btnPause)
         btnSkip = findViewById(R.id.btnSkip)
+        rvTranscriptLog = findViewById(R.id.rvTranscriptLog)
         val btnEnd = findViewById<Button>(R.id.btnEnd)
 
         val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
@@ -76,10 +78,18 @@ class RecordingActivity : AppCompatActivity() {
         SessionData.clear()
         sessionStartTime = System.currentTimeMillis()
 
+        // Set up RecyclerView — new entries always scroll into view at the bottom
+        transcriptAdapter = LiveTranscriptAdapter(this, targetLang, geminiClient, scope)
+        rvTranscriptLog.apply {
+            adapter = transcriptAdapter
+            layoutManager = LinearLayoutManager(this@RecordingActivity).also {
+                it.stackFromEnd = true  // new items appear at bottom
+            }
+        }
+
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            // Disable buttons until permission is resolved
             setControlsEnabled(false)
             ActivityCompat.requestPermissions(
                 this,
@@ -91,7 +101,6 @@ class RecordingActivity : AppCompatActivity() {
         }
 
         btnPause.setOnClickListener {
-            // Ignore taps during skip mode or if not recording
             if (!isRecordingSession || isSongSkippedMode) return@setOnClickListener
             isPausedMode = !isPausedMode
             if (isPausedMode) {
@@ -152,7 +161,6 @@ class RecordingActivity : AppCompatActivity() {
             audioRecorder.stopRecording()
             val endTimeOffset = System.currentTimeMillis() - sessionStartTime
             processChunkAsync(chunkFile, startTimeOffset, endTimeOffset)
-            // Schedule next cycle only if still active
             if (isRecordingSession && !isSongSkippedMode && !isPausedMode) {
                 startChunkCycle()
             }
@@ -160,7 +168,6 @@ class RecordingActivity : AppCompatActivity() {
     }
 
     private fun processChunkAsync(file: File, start: Long, end: Long) {
-        // Launch on IO, then switch to Main for UI — no nested launch needed
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
@@ -172,13 +179,13 @@ class RecordingActivity : AppCompatActivity() {
                     SessionData.entries.add(
                         TranscriptEntry(start, end, originalText, translatedText)
                     )
-                    // Already on Main dispatcher here
-                    tvLog.append("\nID: $originalText\n$targetLang: $translatedText\n—")
+                    // Notify adapter and scroll to the new item
+                    transcriptAdapter.appendEntry()
+                    rvTranscriptLog.smoothScrollToPosition(SessionData.entries.size - 1)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                // Surface errors visibly so they're not silent
-                tvLog.append("\n[Error processing chunk: ${e.message}]\n")
+                tvStatus.text = "⚠️ Chunk error: ${e.message}"
             } finally {
                 withContext(Dispatchers.IO) {
                     audioChunker.safelyDeleteChunk(file)
@@ -206,7 +213,6 @@ class RecordingActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Clean up to avoid leaks if the activity is destroyed mid-session
         handler.removeCallbacksAndMessages(null)
         if (isRecordingSession) {
             audioRecorder.stopRecording()
