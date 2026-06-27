@@ -1,198 +1,193 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/cream_bg"
-    android:padding="24dp">
+    android:background="@color/cream_bg">
 
-    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:gravity="center"
-        android:paddingTop="48dp"
-        android:paddingBottom="40dp">
+        android:padding="24dp">
 
-        <ImageView
-            android:layout_width="72dp"
-            android:layout_height="72dp"
-            android:src="@drawable/ic_launcher_foreground"
-            android:background="@color/navy_deep"
-            android:padding="12dp"
-            android:layout_marginBottom="16dp"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Meeting Scribe"
-            android:textSize="28sp"
-            android:textStyle="bold"
-            android:textColor="@color/navy_deep"
-            android:letterSpacing="0.02"
-            android:layout_marginBottom="4dp"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="JW Meeting Transcription"
-            android:textSize="13sp"
-            android:textColor="@color/text_secondary"
-            android:letterSpacing="0.06"/>
-    </LinearLayout>
-
-    <!-- API Key Card -->
-    <androidx.cardview.widget.CardView
-        xmlns:card_view="http://schemas.android.com/apk/res-auto"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        card_view:cardCornerRadius="12dp"
-        card_view:cardElevation="2dp"
-        card_view:cardBackgroundColor="@color/cream_card"
-        android:layout_marginBottom="16dp">
-
+        <!-- Header -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="20dp">
+            android:gravity="center"
+            android:paddingTop="32dp"
+            android:paddingBottom="32dp">
+
+            <ImageView
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:src="@drawable/ic_launcher_foreground"
+                android:background="@color/navy_deep"
+                android:padding="12dp"
+                android:layout_marginBottom="16dp"/>
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="GEMINI API KEY"
-                android:textSize="11sp"
-                android:textColor="@color/text_secondary"
-                android:letterSpacing="0.1"
-                android:textAllCaps="true"
-                android:layout_marginBottom="8dp"/>
-
-            <!-- Key display row (shown when key saved) -->
-            <LinearLayout
-                android:id="@+id/llKeyDisplay"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:visibility="gone"
-                android:layout_marginBottom="8dp">
-
-                <TextView
-                    android:id="@+id/tvKeyPreview"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:fontFamily="monospace"/>
-
-                <TextView
-                    android:id="@+id/tvChangeKey"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Change"
-                    android:textSize="13sp"
-                    android:textColor="@color/gold_primary"
-                    android:paddingStart="12dp"
-                    android:textStyle="bold"/>
-            </LinearLayout>
-
-            <!-- Key nickname row (shown when key saved) -->
-            <EditText
-                android:id="@+id/etKeyNickname"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="Nickname (e.g. Personal key)"
-                android:textSize="13sp"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_hint"
-                android:backgroundTint="@color/divider"
-                android:inputType="text"
-                android:visibility="gone"
+                android:text="Meeting Scribe"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:textColor="@color/navy_deep"
+                android:letterSpacing="0.02"
                 android:layout_marginBottom="4dp"/>
 
-            <!-- Key input (shown when no key saved / changing) -->
-            <EditText
-                android:id="@+id/etApiKey"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="Paste your Gemini API key"
-                android:textSize="14sp"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/text_hint"
-                android:backgroundTint="@color/divider"
-                android:inputType="textVisiblePassword"
-                android:fontFamily="monospace"/>
-
-        </LinearLayout>
-    </androidx.cardview.widget.CardView>
-
-    <!-- Language Card -->
-    <androidx.cardview.widget.CardView
-        xmlns:card_view="http://schemas.android.com/apk/res-auto"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        card_view:cardCornerRadius="12dp"
-        card_view:cardElevation="2dp"
-        card_view:cardBackgroundColor="@color/cream_card"
-        android:layout_marginBottom="32dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="20dp">
-
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="TRANSLATION LANGUAGE"
-                android:textSize="11sp"
+                android:text="JW Meeting Transcription"
+                android:textSize="13sp"
                 android:textColor="@color/text_secondary"
-                android:letterSpacing="0.1"
-                android:textAllCaps="true"
-                android:layout_marginBottom="12dp"/>
+                android:letterSpacing="0.06"/>
+        </LinearLayout>
 
-            <RadioGroup
-                android:id="@+id/rgLanguage"
+        <!-- API Key Card -->
+        <androidx.cardview.widget.CardView
+            xmlns:card_view="http://schemas.android.com/apk/res-auto"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            card_view:cardCornerRadius="12dp"
+            card_view:cardElevation="2dp"
+            card_view:cardBackgroundColor="@color/cream_card"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:orientation="vertical"
+                android:padding="20dp">
 
-                <RadioButton
-                    android:id="@+id/rbEnglish"
-                    android:layout_width="0dp"
+                <TextView
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="English"
-                    android:textColor="@color/text_primary"
-                    android:buttonTint="@color/navy_deep"
-                    android:checked="true"/>
+                    android:text="API KEY"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:letterSpacing="0.1"
+                    android:textAllCaps="true"
+                    android:layout_marginBottom="8dp"/>
 
-                <RadioButton
-                    android:id="@+id/rbJapanese"
-                    android:layout_width="0dp"
+                <EditText
+                    android:id="@+id/etApiKey"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Japanese"
+                    android:hint="Paste your API key here"
+                    android:textSize="14sp"
                     android:textColor="@color/text_primary"
-                    android:buttonTint="@color/navy_deep"/>
-            </RadioGroup>
-        </LinearLayout>
-    </androidx.cardview.widget.CardView>
+                    android:textColorHint="@color/text_hint"
+                    android:backgroundTint="@color/divider"
+                    android:inputType="textVisiblePassword"
+                    android:fontFamily="monospace"/>
 
-    <Button
-        android:id="@+id/btnLaunch"
-        android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:text="Start Session"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:textColor="@color/navy_deep"
-        android:backgroundTint="@color/gold_primary"
-        android:letterSpacing="0.04"
-        style="@style/Widget.MaterialComponents.Button"/>
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
 
-</LinearLayout>
+        <!-- Provider Card -->
+        <androidx.cardview.widget.CardView
+            xmlns:card_view="http://schemas.android.com/apk/res-auto"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            card_view:cardCornerRadius="12dp"
+            card_view:cardElevation="2dp"
+            card_view:cardBackgroundColor="@color/cream_card"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AI PROVIDER"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:letterSpacing="0.1"
+                    android:textAllCaps="true"
+                    android:layout_marginBottom="8dp"/>
+
+                <Spinner
+                    android:id="@+id/spProvider"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:backgroundTint="@color/navy_deep"/>
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Language Card -->
+        <androidx.cardview.widget.CardView
+            xmlns:card_view="http://schemas.android.com/apk/res-auto"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            card_view:cardCornerRadius="12dp"
+            card_view:cardElevation="2dp"
+            card_view:cardBackgroundColor="@color/cream_card"
+            android:layout_marginBottom="32dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="TRANSLATION LANGUAGE"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:letterSpacing="0.1"
+                    android:textAllCaps="true"
+                    android:layout_marginBottom="12dp"/>
+
+                <RadioGroup
+                    android:id="@+id/rgLanguage"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/rbEnglish"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="English"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/navy_deep"
+                        android:checked="true"/>
+
+                    <RadioButton
+                        android:id="@+id/rbJapanese"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Japanese"
+                        android:textColor="@color/text_primary"
+                        android:buttonTint="@color/navy_deep"/>
+                </RadioGroup>
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <Button
+            android:id="@+id/btnLaunch"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="Start Session"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/navy_deep"
+            android:backgroundTint="@color/gold_primary"
+            android:letterSpacing="0.04"
+            style="@style/Widget.MaterialComponents.Button"/>
+
+    </LinearLayout>
+</ScrollView>

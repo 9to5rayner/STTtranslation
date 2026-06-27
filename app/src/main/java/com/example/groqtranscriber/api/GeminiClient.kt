@@ -13,16 +13,61 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 
-class GeminiClient(private val apiKey: String) {
+/**
+ * Handles all LLM API calls.
+ *
+ * Both Google Gemini (direct) and kie.ai's native Gemini endpoint share the
+ * same request/response envelope (contents → parts → inlineData for audio,
+ * candidates → content → parts → text for output). The only differences are:
+ *
+ *  - The URL (carried by [ApiProvider.baseUrl])
+ *  - Auth style: Google uses ?key=… query param; kie.ai uses Bearer token header
+ *
+ * This class handles both transparently via the [provider] parameter.
+ */
+class GeminiClient(
+    private val apiKey: String,
+    private val provider: ApiProvider = ApiProvider.GOOGLE_GEMINI
+) {
 
     private val client = OkHttpClient()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val apiUrl =
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
 
     /**
-     * Sends an audio file to Gemini for STT + translation in one shot.
-     * Returns a Pair(originalIndonesian, translatedText).
+     * Builds the final request URL.
+     * - Google: appends ?key= to the base URL
+     * - kie.ai: uses the base URL as-is (auth goes in header)
+     */
+    private val apiUrl: String
+        get() = if (provider.useBearerAuth) {
+            provider.baseUrl
+        } else {
+            "${provider.baseUrl}?key=$apiKey"
+        }
+
+    /**
+     * Builds an OkHttp Request with the correct auth style for the active provider.
+     */
+    private fun buildRequest(body: RequestBody): Request {
+        val builder = Request.Builder()
+            .url(apiUrl)
+            .post(body)
+        if (provider.useBearerAuth) {
+            builder.addHeader("Authorization", "Bearer $apiKey")
+        }
+        return builder.build()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Public API
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Sends an audio file to the model for STT + translation in one shot.
+     * Audio is encoded as base64 inline data — works with both Google and kie.ai
+     * native Gemini endpoints.
+     *
+     * @return Pair(originalIndonesian, translatedText)
      */
     suspend fun processAudio(file: File, targetLanguage: String): Pair<String, String> =
         suspendCancellableCoroutine { continuation ->
@@ -48,16 +93,8 @@ class GeminiClient(private val apiKey: String) {
                     })
                 }
 
-                val body = JsonObject().apply {
-                    add("contents", JsonArray().apply {
-                        add(JsonObject().apply { add("parts", parts) })
-                    })
-                }
-
-                val request = Request.Builder()
-                    .url(apiUrl)
-                    .post(body.toString().toRequestBody(jsonMediaType))
-                    .build()
+                val requestBody = buildGeminiBody(parts)
+                val request = buildRequest(requestBody.toString().toRequestBody(jsonMediaType))
 
                 client.newCall(request).enqueue(object : Callback {
                     override fun onFailure(call: Call, e: IOException) =
@@ -67,7 +104,7 @@ class GeminiClient(private val apiKey: String) {
                         response.use { res ->
                             if (!res.isSuccessful) {
                                 continuation.resumeWithException(
-                                    IOException("Gemini API Error: ${res.code}")
+                                    IOException("${provider.displayName} API Error ${res.code}: ${res.body?.string()}")
                                 )
                                 return
                             }
@@ -107,16 +144,8 @@ class GeminiClient(private val apiKey: String) {
                     add(JsonObject().apply { addProperty("text", promptText) })
                 }
 
-                val body = JsonObject().apply {
-                    add("contents", JsonArray().apply {
-                        add(JsonObject().apply { add("parts", parts) })
-                    })
-                }
-
-                val request = Request.Builder()
-                    .url(apiUrl)
-                    .post(body.toString().toRequestBody(jsonMediaType))
-                    .build()
+                val requestBody = buildGeminiBody(parts)
+                val request = buildRequest(requestBody.toString().toRequestBody(jsonMediaType))
 
                 client.newCall(request).enqueue(object : Callback {
                     override fun onFailure(call: Call, e: IOException) =
@@ -126,7 +155,7 @@ class GeminiClient(private val apiKey: String) {
                         response.use { res ->
                             if (!res.isSuccessful) {
                                 continuation.resumeWithException(
-                                    IOException("Gemini API Error: ${res.code}")
+                                    IOException("${provider.displayName} API Error ${res.code}: ${res.body?.string()}")
                                 )
                                 return
                             }
@@ -144,8 +173,23 @@ class GeminiClient(private val apiKey: String) {
             }
         }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Private helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * Shared response parser — pulls the text content out of Gemini's response envelope.
+     * Wraps a parts array in the standard Gemini request envelope.
+     * Identical for Google and kie.ai native Gemini format.
+     */
+    private fun buildGeminiBody(parts: JsonArray): JsonObject = JsonObject().apply {
+        add("contents", JsonArray().apply {
+            add(JsonObject().apply { add("parts", parts) })
+        })
+    }
+
+    /**
+     * Extracts the text content from a Gemini-format response.
+     * Works for both Google's direct API and kie.ai's native Gemini endpoint.
      */
     private fun extractTextFromResponse(responseBody: String): String {
         val json = JsonParser.parseString(responseBody).asJsonObject

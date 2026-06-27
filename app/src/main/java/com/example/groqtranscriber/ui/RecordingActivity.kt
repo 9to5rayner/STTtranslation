@@ -15,6 +15,7 @@ import androidx.core.app.ActivityCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.groqtranscriber.R
+import com.example.groqtranscriber.api.ApiProvider
 import com.example.groqtranscriber.audio.AudioChunker
 import com.example.groqtranscriber.audio.AudioRecorder
 import com.example.groqtranscriber.api.GeminiClient
@@ -55,13 +56,13 @@ class RecordingActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_recording)
 
-        tvStatus = findViewById(R.id.tvStatus)
-        btnPause = findViewById(R.id.btnPause)
-        btnSkip = findViewById(R.id.btnSkip)
+        tvStatus        = findViewById(R.id.tvStatus)
+        btnPause        = findViewById(R.id.btnPause)
+        btnSkip         = findViewById(R.id.btnSkip)
         rvTranscriptLog = findViewById(R.id.rvTranscriptLog)
-        val btnEnd = findViewById<Button>(R.id.btnEnd)
+        val btnEnd      = findViewById<Button>(R.id.btnEnd)
 
-        val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
+        val prefs  = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("api_key", "") ?: ""
 
         if (apiKey.isEmpty()) {
@@ -70,20 +71,31 @@ class RecordingActivity : AppCompatActivity() {
             return
         }
 
-        geminiClient = GeminiClient(apiKey)
-        audioRecorder = AudioRecorder(this)
-        audioChunker = AudioChunker(this)
-        targetLang = intent.getStringExtra("TARGET_LANG") ?: "English"
+        // ── Resolve the provider that was selected on the launch screen ────
+        val providerName = intent.getStringExtra("API_PROVIDER") ?: ApiProvider.GOOGLE_GEMINI.name
+        val provider = try {
+            ApiProvider.valueOf(providerName)
+        } catch (e: IllegalArgumentException) {
+            ApiProvider.GOOGLE_GEMINI
+        }
+
+        geminiClient    = GeminiClient(apiKey, provider)
+        audioRecorder   = AudioRecorder(this)
+        audioChunker    = AudioChunker(this)
+        targetLang      = intent.getStringExtra("TARGET_LANG") ?: "English"
+
+        // Show which provider is active in the status bar
+        tvStatus.text = "🔴 Recording · ${provider.displayName}"
 
         SessionData.clear()
         sessionStartTime = System.currentTimeMillis()
 
-        // Set up RecyclerView — new entries always scroll into view at the bottom
+        // Set up RecyclerView
         transcriptAdapter = LiveTranscriptAdapter(this, targetLang, geminiClient, scope)
         rvTranscriptLog.apply {
-            adapter = transcriptAdapter
+            adapter       = transcriptAdapter
             layoutManager = LinearLayoutManager(this@RecordingActivity).also {
-                it.stackFromEnd = true  // new items appear at bottom
+                it.stackFromEnd = true
             }
         }
 
@@ -109,8 +121,8 @@ class RecordingActivity : AppCompatActivity() {
                 audioRecorder.stopRecording()
                 handler.removeCallbacksAndMessages(null)
             } else {
-                btnPause.text = "Pause Session"
-                tvStatus.text = "🔴 Recording active..."
+                btnPause.text  = "Pause Session"
+                tvStatus.text  = "🔴 Recording · ${provider.displayName}"
                 startChunkCycle()
             }
         }
@@ -119,13 +131,13 @@ class RecordingActivity : AppCompatActivity() {
             if (isPausedMode) return@setOnClickListener
             isSongSkippedMode = !isSongSkippedMode
             if (isSongSkippedMode) {
-                btnSkip.text = "Resume Music"
+                btnSkip.text  = "Resume Music"
                 tvStatus.text = "⏭️ Paused (Skip Song Active)"
                 audioRecorder.stopRecording()
                 handler.removeCallbacksAndMessages(null)
             } else {
-                btnSkip.text = "Skip Song"
-                tvStatus.text = "🔴 Recording active..."
+                btnSkip.text  = "Skip Song"
+                tvStatus.text = "🔴 Recording · ${provider.displayName}"
                 startChunkCycle()
             }
         }
@@ -136,7 +148,8 @@ class RecordingActivity : AppCompatActivity() {
             audioRecorder.stopRecording()
             startActivity(
                 Intent(this, ExportActivity::class.java).apply {
-                    putExtra("TARGET_LANG", targetLang)
+                    putExtra("TARGET_LANG",   targetLang)
+                    putExtra("API_PROVIDER",  provider.name)
                 }
             )
             finish()
@@ -145,15 +158,15 @@ class RecordingActivity : AppCompatActivity() {
 
     private fun setControlsEnabled(enabled: Boolean) {
         btnPause.isEnabled = enabled
-        btnSkip.isEnabled = enabled
+        btnSkip.isEnabled  = enabled
     }
 
     private fun startChunkCycle() {
         if (!isRecordingSession || isSongSkippedMode || isPausedMode) return
 
         currentChunkStartTime = System.currentTimeMillis()
-        val startTimeOffset = currentChunkStartTime - sessionStartTime
-        val chunkFile = audioChunker.createChunkFile(chunkIndex++)
+        val startTimeOffset   = currentChunkStartTime - sessionStartTime
+        val chunkFile         = audioChunker.createChunkFile(chunkIndex++)
 
         audioRecorder.startRecording(chunkFile)
 
@@ -170,16 +183,11 @@ class RecordingActivity : AppCompatActivity() {
     private fun processChunkAsync(file: File, start: Long, end: Long) {
         scope.launch {
             try {
-                val result = withContext(Dispatchers.IO) {
-                    geminiClient.processAudio(file, targetLang)
-                }
-                val originalText = result.first
+                val result         = withContext(Dispatchers.IO) { geminiClient.processAudio(file, targetLang) }
+                val originalText   = result.first
                 val translatedText = result.second
                 if (originalText.isNotBlank()) {
-                    SessionData.entries.add(
-                        TranscriptEntry(start, end, originalText, translatedText)
-                    )
-                    // Notify adapter and scroll to the new item
+                    SessionData.entries.add(TranscriptEntry(start, end, originalText, translatedText))
                     transcriptAdapter.appendEntry()
                     rvTranscriptLog.smoothScrollToPosition(SessionData.entries.size - 1)
                 }
@@ -187,9 +195,7 @@ class RecordingActivity : AppCompatActivity() {
                 e.printStackTrace()
                 tvStatus.text = "⚠️ Chunk error: ${e.message}"
             } finally {
-                withContext(Dispatchers.IO) {
-                    audioChunker.safelyDeleteChunk(file)
-                }
+                withContext(Dispatchers.IO) { audioChunker.safelyDeleteChunk(file) }
             }
         }
     }
@@ -214,13 +220,11 @@ class RecordingActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
-        if (isRecordingSession) {
-            audioRecorder.stopRecording()
-        }
+        if (isRecordingSession) audioRecorder.stopRecording()
     }
 
     companion object {
         private const val REQUEST_AUDIO_PERMISSION = 200
-        private const val CHUNK_DURATION_MS = 12_000L
+        private const val CHUNK_DURATION_MS        = 12_000L
     }
 }
