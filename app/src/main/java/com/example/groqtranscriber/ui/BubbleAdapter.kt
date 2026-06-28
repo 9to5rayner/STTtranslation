@@ -15,10 +15,12 @@ import com.example.groqtranscriber.R
 import com.example.groqtranscriber.api.GeminiClient
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.TranscriptEntry
+import com.example.groqtranscriber.audio.WavWriter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Renders each TranscriptEntry as a two-bubble chat item:
@@ -179,9 +181,7 @@ class BubbleAdapter(
             val audioPath = try {
                 val pcm = withContext(Dispatchers.IO) { geminiClient.generateTts(translated) }
                 val wavFile = File(context.filesDir, "tts_${SessionData.entries[index].id}.wav")
-                withContext(Dispatchers.IO) {
-                    com.example.groqtranscriber.audio.WavWriter.write(pcm, wavFile)
-                }
+                withContext(Dispatchers.IO) { WavWriter.write(pcm, wavFile) }
                 wavFile.absolutePath
             } catch (e: Exception) { null }
 
