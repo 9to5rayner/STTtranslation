@@ -42,9 +42,10 @@ import java.io.File
  *   • ttsError set      → ⚠️ error row + ↻ retry button, play button disabled
  *
  * TTS generation itself is provider-agnostic from this class's point of view —
- * geminiClient.generateTts() + geminiClient.writeTtsBytesToWav() handle the
- * difference between native Gemini TTS (raw PCM) and EasyVoice (complete WAV
- * file) internally.
+ * geminiClient.generateTts() + geminiClient.ttsFileExtension() +
+ * geminiClient.writeTtsBytesToFile() handle the difference between native
+ * Gemini TTS (raw PCM → .wav) and kie.ai/ElevenLabs Turbo v2.5 (complete
+ * mp3 file → .mp3) internally.
  */
 class BubbleAdapter(
     private val context:        Context,
@@ -172,18 +173,20 @@ class BubbleAdapter(
      * pipeline-completion path (applyEdit) and the manual retry path so both
      * report errors the same way instead of one of them swallowing to null.
      *
-     * geminiClient.generateTts() + geminiClient.writeTtsBytesToWav() handle
-     * the byte-format difference between native Gemini TTS and EasyVoice
-     * internally — this function doesn't need to know which provider is active.
+     * geminiClient.generateTts() + ttsFileExtension()/writeTtsBytesToFile()
+     * handle the byte-format difference between native Gemini TTS and
+     * kie.ai/ElevenLabs internally — this function doesn't need to know
+     * which provider is active.
      */
     private suspend fun runTtsPhase(index: Int, translatedText: String) {
         if (index >= SessionData.entries.size) return
 
         val result: Result<String> = try {
-            val ttsBytes = withContext(Dispatchers.IO) { geminiClient.generateTts(translatedText) }
-            val wavFile = File(context.filesDir, "tts_${SessionData.entries[index].id}.wav")
-            withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToWav(ttsBytes, wavFile) }
-            Result.success(wavFile.absolutePath)
+            val ttsBytes  = withContext(Dispatchers.IO) { geminiClient.generateTts(translatedText) }
+            val ext       = geminiClient.ttsFileExtension()
+            val audioFile = File(context.filesDir, "tts_${SessionData.entries[index].id}.$ext")
+            withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToFile(ttsBytes, audioFile) }
+            Result.success(audioFile.absolutePath)
         } catch (e: TtsException) {
             Result.failure(e)
         } catch (e: Exception) {

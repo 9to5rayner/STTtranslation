@@ -20,8 +20,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.groqtranscriber.R
 import com.example.groqtranscriber.api.ApiProvider
-import com.example.groqtranscriber.api.EasyVoiceClient
 import com.example.groqtranscriber.api.GeminiClient
+import com.example.groqtranscriber.api.KieAiTtsClient
 import com.example.groqtranscriber.api.TtsException
 import com.example.groqtranscriber.audio.AudioChunker
 import com.example.groqtranscriber.audio.AudioRecorder
@@ -88,25 +88,15 @@ class RecordingActivity : AppCompatActivity() {
         provider = try { ApiProvider.valueOf(providerName) }
                    catch (_: IllegalArgumentException) { ApiProvider.GOOGLE_GEMINI }
 
-        // ── Resolve TTS backend (native Gemini vs. EasyVoice) ───────────────────
-        // kie.ai has no Gemini TTS model, so that provider's audio generation is
-        // delegated to EasyVoice using a separate key (see ApiProvider.needsSeparateTtsKey
-        // and LaunchActivity's second key field).
-        val easyVoiceClient: EasyVoiceClient? = if (provider.needsSeparateTtsKey) {
-            val ttsKey = prefs.getString("tts_api_key", "") ?: ""
-            if (ttsKey.isEmpty()) {
-                Toast.makeText(
-                    this,
-                    "No TTS API key configured for ${provider.displayName} — please go back and add one.",
-                    Toast.LENGTH_LONG
-                ).show()
-                finish(); return
-            }
-            EasyVoiceClient(ttsKey)
-        } else null
+        // ── Resolve TTS backend (native Gemini vs. kie.ai/ElevenLabs) ───────────
+        // kie.ai has no Gemini TTS model, so that provider's audio generation
+        // goes through KieAiTtsClient (ElevenLabs Turbo v2.5 via kie.ai's async
+        // Jobs API) instead — reusing the SAME api key, no separate key needed.
+        val kieAiTtsClient: KieAiTtsClient? =
+            if (!provider.useNativeGeminiTts) KieAiTtsClient(apiKey) else null
 
         targetLang   = intent.getStringExtra("TARGET_LANG") ?: "English"
-        geminiClient = GeminiClient(apiKey, provider, easyVoiceClient)
+        geminiClient = GeminiClient(apiKey, provider, kieAiTtsClient)
         audioRecorder = AudioRecorder(this)
         audioChunker  = AudioChunker(this)
 
@@ -304,15 +294,16 @@ class RecordingActivity : AppCompatActivity() {
                 // Records the specific failure reason on ttsError (instead of
                 // silently leaving audioFilePath null) so the UI can show an
                 // error tag + retry button (see BubbleAdapter.retryTts).
-                // writeTtsBytesToWav() handles the byte-format difference
-                // between native Gemini TTS (raw PCM, needs a WAV header) and
-                // EasyVoice (already a complete WAV file) — callers don't need
-                // to know which path produced the bytes.
+                // ttsFileExtension()/writeTtsBytesToFile() handle the format
+                // difference between native Gemini TTS (raw PCM → .wav) and
+                // kie.ai/ElevenLabs (complete mp3 file → .mp3) — callers don't
+                // need to know which path produced the bytes.
                 val ttsResult: Result<String> = try {
                     val ttsBytes = withContext(Dispatchers.IO) { geminiClient.generateTts(translated) }
-                    val wavFile  = File(filesDir, "tts_${SessionData.entries[index].id}.wav")
-                    withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToWav(ttsBytes, wavFile) }
-                    Result.success(wavFile.absolutePath)
+                    val ext      = geminiClient.ttsFileExtension()
+                    val audioFile = File(filesDir, "tts_${SessionData.entries[index].id}.$ext")
+                    withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToFile(ttsBytes, audioFile) }
+                    Result.success(audioFile.absolutePath)
                 } catch (e: TtsException) {
                     e.printStackTrace()
                     Result.failure(e)

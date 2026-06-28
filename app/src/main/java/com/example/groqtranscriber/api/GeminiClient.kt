@@ -22,14 +22,19 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  *
  * TTS: branches by provider.
  *  - GOOGLE_GEMINI  → native Gemini TTS (generateContent w/ AUDIO modality).
- *  - KIE_AI_GEMINI  → delegates to [easyVoiceClient], since kie.ai has no
- *                     Gemini TTS-capable model. Requires a separate API key
- *                     (see [ApiProvider.needsSeparateTtsKey]).
+ *                     Returns raw PCM bytes; needs a WAV header (WavWriter).
+ *  - KIE_AI_GEMINI  → delegates to [kieAiTtsClient], which runs ElevenLabs
+ *                     "Text To Speech Turbo 2.5" via kie.ai's async Jobs API
+ *                     (create task → poll → download). Returns a complete
+ *                     mp3 file already — write as-is.
+ *
+ * Use [ttsFileExtension] to name output files correctly, and
+ * [writeTtsBytesToFile] to write them correctly, regardless of provider.
  */
 class GeminiClient(
     private val apiKey: String,
     private val provider: ApiProvider = ApiProvider.GOOGLE_GEMINI,
-    private val easyVoiceClient: EasyVoiceClient? = null
+    private val kieAiTtsClient: KieAiTtsClient? = null
 ) {
     private val client        = OkHttpClient()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -98,34 +103,53 @@ class GeminiClient(
     // ── 3. Text-to-speech ─────────────────────────────────────────────────────
 
     /**
+     * The correct file extension for whatever [generateTts] will return,
+     * given the active provider. Callers should use this when building the
+     * output File so they don't mislabel an mp3 as .wav or vice versa.
+     */
+    fun ttsFileExtension(): String = if (provider.useNativeGeminiTts) "wav" else "mp3"
+
+    /**
      * Converts [text] to speech.
      *
-     * Returns bytes ready to write DIRECTLY to a .wav file:
-     *  - GOOGLE_GEMINI path returns raw 16-bit/24kHz PCM, which the caller
-     *    must wrap with [com.example.groqtranscriber.audio.WavWriter] first.
-     *  - KIE_AI_GEMINI (EasyVoice) path returns a COMPLETE wav file already —
-     *    do NOT pass it through WavWriter, just write it as-is.
-     *
-     * Callers should check `provider.useNativeGeminiTts` to know which case
-     * they're in (see [TtsResult] used by BubbleAdapter/RecordingActivity).
+     * Returns bytes ready to write DIRECTLY to a file named with
+     * [ttsFileExtension] — use [writeTtsBytesToFile] to do that correctly:
+     *  - GOOGLE_GEMINI path returns raw 16-bit/24kHz PCM, which gets wrapped
+     *    with a WAV header (WavWriter) before writing.
+     *  - KIE_AI_GEMINI path (ElevenLabs Turbo v2.5 via kie.ai) returns a
+     *    complete mp3 file already — written as-is.
      *
      * Voice (Gemini path): "Kore" (neutral, clear). Override [voiceName] to
      * try others: Puck, Charon, Fenrir, Aoede, etc.
-     * Voice (EasyVoice path): "af_heart" by default; override [voiceName]
-     * with any EasyVoice voice ID.
+     * Voice (kie.ai/ElevenLabs path): "Rachel" by default; override
+     * [voiceName] with any ElevenLabs voice name or voice ID from the
+     * Turbo v2.5 voice list.
      *
      * Throws [TtsException] with a specific, human-readable reason on failure.
      */
     suspend fun generateTts(text: String, voiceName: String? = null): ByteArray {
         if (!provider.useNativeGeminiTts) {
-            val evClient = easyVoiceClient
+            val ttsClient = kieAiTtsClient
                 ?: throw TtsException(
-                    "No EasyVoice API key configured for ${provider.displayName}. " +
-                    "Add a TTS API key on the launch screen."
+                    "No kie.ai TTS client configured for ${provider.displayName}. " +
+                    "This is an internal setup error — GeminiClient was constructed without one."
                 )
-            return evClient.generateSpeech(text, voice = voiceName ?: "af_heart")
+            return ttsClient.generateSpeech(text, voice = voiceName ?: "Rachel")
         }
         return generateGeminiTts(text, voiceName ?: "Kore")
+    }
+
+    /**
+     * Writes the bytes returned by [generateTts] to [outputFile] correctly,
+     * regardless of which provider/path produced them. [outputFile] should
+     * already be named with the extension from [ttsFileExtension].
+     */
+    fun writeTtsBytesToFile(ttsBytes: ByteArray, outputFile: File) {
+        if (provider.useNativeGeminiTts) {
+            com.example.groqtranscriber.audio.WavWriter.write(ttsBytes, outputFile)
+        } else {
+            outputFile.writeBytes(ttsBytes)
+        }
     }
 
     /** Native Gemini TTS — unchanged from before, just extracted into its own function. */
@@ -224,23 +248,6 @@ class GeminiClient(
             } catch (e: Exception) { cont.resumeWithException(TtsException("TTS request setup failed: ${e.message}", e)) }
         }
 
-    /**
-     * Writes the bytes returned by [generateTts] to [outputFile] correctly,
-     * regardless of which provider/path produced them:
-     *  - Native Gemini TTS bytes are raw PCM → wrapped with [WavWriter].
-     *  - EasyVoice bytes are already a complete WAV file → written as-is.
-     *
-     * Centralizing this here means callers never need to know or branch on
-     * `provider.useNativeGeminiTts` themselves.
-     */
-    fun writeTtsBytesToWav(ttsBytes: ByteArray, outputFile: File) {
-        if (provider.useNativeGeminiTts) {
-            com.example.groqtranscriber.audio.WavWriter.write(ttsBytes, outputFile)
-        } else {
-            outputFile.writeBytes(ttsBytes)
-        }
-    }
-
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun textPart(text: String) = JsonObject().apply { addProperty("text", text) }
@@ -286,9 +293,9 @@ class GeminiClient(
 }
 
 /**
- * Thrown by [GeminiClient.generateTts] / [EasyVoiceClient.generateSpeech]
+ * Thrown by [GeminiClient.generateTts] / [KieAiTtsClient.generateSpeech]
  * with a specific, user-presentable reason for the failure (network error,
- * HTTP error, blocked content, model returned text instead of audio,
- * missing API key, malformed response, etc.).
+ * HTTP error, blocked content, task failure/timeout, model returned text
+ * instead of audio, malformed response, etc.).
  */
 class TtsException(message: String, cause: Throwable? = null) : Exception(message, cause)

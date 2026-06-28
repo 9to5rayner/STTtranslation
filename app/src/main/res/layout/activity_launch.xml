@@ -88,59 +88,6 @@
             </LinearLayout>
         </androidx.cardview.widget.CardView>
 
-        <!-- TTS API Key Card (EasyVoice) — only shown for providers that need a
-             separate TTS key, e.g. kie.ai (no native Gemini TTS model). Toggled
-             by LaunchActivity based on the selected provider. -->
-        <androidx.cardview.widget.CardView
-            android:id="@+id/cardTtsKey"
-            xmlns:card_view="http://schemas.android.com/apk/res-auto"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            card_view:cardCornerRadius="12dp"
-            card_view:cardElevation="2dp"
-            card_view:cardBackgroundColor="@color/cream_card"
-            android:layout_marginBottom="16dp"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="TTS API KEY (EASYVOICE)"
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary"
-                    android:letterSpacing="0.1"
-                    android:textAllCaps="true"
-                    android:layout_marginBottom="8dp"/>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="This provider has no built-in text-to-speech model. Audio is generated separately via EasyVoice."
-                    android:textSize="11sp"
-                    android:textColor="@color/text_hint"
-                    android:layout_marginBottom="10dp"/>
-
-                <EditText
-                    android:id="@+id/etTtsApiKey"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="Paste your EasyVoice API key here (ev_...)"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_hint"
-                    android:backgroundTint="@color/divider"
-                    android:inputType="textVisiblePassword"
-                    android:fontFamily="monospace"/>
-
-            </LinearLayout>
-        </androidx.cardview.widget.CardView>
-
         <!-- Provider Card -->
         <androidx.cardview.widget.CardView
             xmlns:card_view="http://schemas.android.com/apk/res-auto"
