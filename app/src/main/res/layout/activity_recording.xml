@@ -10,72 +10,62 @@
         android:id="@+id/tvStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Ready — tap Start to begin"
-        android:textSize="15sp"
+        android:text="Ready"
+        android:textSize="14sp"
         android:textStyle="bold"
         android:textColor="@color/cream_card"
         android:gravity="center"
         android:background="@color/navy_deep"
-        android:paddingTop="14dp"
-        android:paddingBottom="14dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
         android:paddingStart="16dp"
         android:paddingEnd="16dp"/>
 
-    <!-- Live transcript feed -->
+    <!-- Scrollable transcript feed -->
     <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rvTranscriptLog"
+        android:id="@+id/rvFeed"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:clipToPadding="false"
         android:padding="8dp"/>
 
-    <!-- Hint below list -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Tap any bubble to edit transcription"
-        android:textSize="11sp"
-        android:textColor="@color/text_hint"
-        android:gravity="center"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"/>
-
-    <!-- Control strip -->
+    <!-- ── Bottom control panel ── -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:background="@color/cream_card"
         android:elevation="8dp"
-        android:padding="12dp">
+        android:padding="16dp">
 
-        <!-- Start button — only visible before recording begins -->
-        <Button
-            android:id="@+id/btnStart"
+        <!-- Countdown timer — large and central -->
+        <TextView
+            android:id="@+id/tvTimer"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:text="▶  Start Recording"
-            android:textSize="16sp"
+            android:layout_height="wrap_content"
+            android:text="1:00"
+            android:textSize="42sp"
+            android:textStyle="bold"
+            android:textColor="@color/navy_deep"
+            android:gravity="center"
+            android:layout_marginBottom="12dp"
+            android:fontFamily="monospace"/>
+
+        <!-- Big record / stop button -->
+        <Button
+            android:id="@+id/btnRecord"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:text="⏺  Record"
+            android:textSize="18sp"
             android:textStyle="bold"
             android:textColor="@color/navy_deep"
             android:backgroundTint="@color/gold_primary"
-            android:layout_marginBottom="8dp"
+            android:layout_marginBottom="10dp"
             style="@style/Widget.MaterialComponents.Button"/>
 
-        <!-- Pause / Resume — hidden until recording starts -->
-        <Button
-            android:id="@+id/btnPause"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="Pause"
-            android:visibility="gone"
-            android:textColor="@color/cream_card"
-            android:backgroundTint="@color/navy_mid"
-            android:layout_marginBottom="8dp"
-            style="@style/Widget.MaterialComponents.Button"/>
-
-        <!-- Row: Skip Song + End Session -->
+        <!-- Utility row: Export + Clear -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -83,26 +73,24 @@
             android:weightSum="2">
 
             <Button
-                android:id="@+id/btnSkip"
+                android:id="@+id/btnExport"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginEnd="4dp"
-                android:text="Skip Song"
-                android:enabled="false"
+                android:text="Export"
                 android:textColor="@color/cream_card"
-                android:backgroundTint="@color/navy_surface"
+                android:backgroundTint="@color/navy_deep"
                 style="@style/Widget.MaterialComponents.Button"/>
 
             <Button
-                android:id="@+id/btnEnd"
+                android:id="@+id/btnClear"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
-                android:text="End Session"
-                android:enabled="false"
-                style="@style/App.Button.Danger"/>
+                android:text="Clear History"
+                style="@style/App.Button.Outline"/>
 
         </LinearLayout>
     </LinearLayout>

@@ -1,32 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Chat-bubble layout for one transcript chunk.
-
-  Structure (top to bottom, all left-aligned):
-    ┌──────────────────────────────────────────┐
-    │  🕐  0:12 → 0:20          [tap to edit]  │
-    │  ┌──────────────────────────────────┐    │
-    │  │  🇮🇩  Indonesian text here...    │  navy bubble
-    │  └──────────────────────────────────┘    │
-    │  ┌──────────────────────────────────┐    │
-    │  │  🌐  Translation here...         │  gold bubble
-    │  └──────────────────────────────────┘    │
-    │     (or a "Translating…" shimmer)         │
-    └──────────────────────────────────────────┘
--->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="8dp"
-    android:layout_marginBottom="4dp">
+    android:padding="10dp"
+    android:layout_marginBottom="6dp">
 
-    <!-- Timestamp row -->
+    <!-- ── Row 1: timestamp / edit hint / EDITED tag ── -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginBottom="4dp">
+        android:gravity="center_vertical"
+        android:layout_marginBottom="6dp">
 
         <TextView
             android:id="@+id/tvTimestamp"
@@ -34,8 +20,23 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:textSize="11sp"
-            android:textColor="#9AAAC0"
-            android:drawablePadding="4dp"/>
+            android:textColor="@color/text_hint"/>
+
+        <!-- EDITED tag — only shown when isEdited = true -->
+        <TextView
+            android:id="@+id/tvEdited"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="EDITED"
+            android:textSize="10sp"
+            android:textColor="@color/cream_card"
+            android:background="@color/navy_surface"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:layout_marginEnd="6dp"
+            android:visibility="gone"/>
 
         <TextView
             android:id="@+id/tvEditHint"
@@ -43,26 +44,54 @@
             android:layout_height="wrap_content"
             android:text="tap to edit"
             android:textSize="11sp"
-            android:textColor="#C9A84C"/>
+            android:textColor="@color/gold_primary"
+            android:visibility="gone"/>
     </LinearLayout>
 
-    <!-- Indonesian bubble (navy) -->
+    <!-- ── "Transcribing…" placeholder ── -->
     <LinearLayout
+        android:id="@+id/llTranscribing"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginBottom="4dp">
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp"
+        android:visibility="gone">
 
-        <!-- Flag badge -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🎙️"
+            android:textSize="16sp"
+            android:layout_marginEnd="8dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Transcribing…"
+            android:textSize="13sp"
+            android:textColor="@color/text_secondary"
+            android:textStyle="italic"/>
+    </LinearLayout>
+
+    <!-- ── Indonesian bubble (navy) ── -->
+    <LinearLayout
+        android:id="@+id/llNavyRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="top"
+        android:layout_marginBottom="4dp"
+        android:visibility="gone">
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="🇮🇩"
-            android:textSize="14sp"
+            android:textSize="15sp"
             android:layout_marginEnd="6dp"
-            android:layout_marginTop="6dp"/>
+            android:layout_marginTop="4dp"/>
 
-        <!-- Bubble -->
         <TextView
             android:id="@+id/tvOriginal"
             android:layout_width="0dp"
@@ -71,22 +100,40 @@
             android:background="@drawable/bubble_navy"
             android:textColor="#FFFFFF"
             android:textSize="14sp"
-            android:lineSpacingMultiplier="1.3"
-            android:padding="10dp"/>
+            android:lineSpacingMultiplier="1.35"
+            android:padding="12dp"/>
     </LinearLayout>
 
-    <!-- Translation bubble (gold) — visible once translation arrives -->
+    <!-- ── "Translating…" row ── -->
     <LinearLayout
-        android:id="@+id/llTranslationRow"
+        android:id="@+id/llTranslating"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="28dp"
+        android:layout_marginBottom="4dp"
         android:visibility="gone">
 
-        <!-- Spacer to indent below the flag -->
-        <View
-            android:layout_width="26dp"
-            android:layout_height="1dp"/>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⏳ Translating…"
+            android:textSize="12sp"
+            android:textColor="@color/gold_primary"
+            android:textStyle="italic"/>
+    </LinearLayout>
+
+    <!-- ── Translation bubble (gold) + play button ── -->
+    <LinearLayout
+        android:id="@+id/llGoldRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="28dp"
+        android:layout_marginBottom="4dp"
+        android:visibility="gone">
 
         <TextView
             android:id="@+id/tvTranslation"
@@ -94,33 +141,42 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:background="@drawable/bubble_gold"
-            android:textColor="#1A2744"
+            android:textColor="@color/navy_deep"
             android:textSize="13sp"
-            android:lineSpacingMultiplier="1.3"
-            android:padding="10dp"/>
+            android:lineSpacingMultiplier="1.35"
+            android:padding="12dp"/>
+
+        <!-- ▶ Play button -->
+        <ImageButton
+            android:id="@+id/btnPlay"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:src="@android:drawable/ic_media_play"
+            android:background="@drawable/bubble_navy"
+            android:tint="@color/gold_primary"
+            android:padding="10dp"
+            android:contentDescription="Play translation"
+            android:visibility="gone"/>
     </LinearLayout>
 
-    <!-- "Translating…" placeholder — shown while translation API call is in flight -->
+    <!-- ── "Generating audio…" row ── -->
     <LinearLayout
-        android:id="@+id/llTranslatingRow"
+        android:id="@+id/llTtsLoading"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="28dp"
         android:visibility="gone">
 
-        <View
-            android:layout_width="26dp"
-            android:layout_height="1dp"/>
-
         <TextView
-            android:id="@+id/tvTranslating"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⏳ Translating…"
+            android:text="🔊 Generating audio…"
             android:textSize="12sp"
-            android:textColor="#C9A84C"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp"/>
+            android:textColor="@color/text_secondary"
+            android:textStyle="italic"/>
     </LinearLayout>
 
 </LinearLayout>

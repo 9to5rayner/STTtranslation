@@ -14,163 +14,180 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
- * Handles all LLM API calls.
+ * All LLM API calls — STT, translation, and TTS — in one place.
  *
- * Speed strategy: transcription and translation are now SEPARATE calls.
- * The caller shows the Indonesian text immediately after transcribeAudio()
- * returns, then fires translateText() and updates the UI when that finishes.
- * This halves perceived latency.
- *
- * Both Google Gemini (direct) and kie.ai's native Gemini endpoint share the
- * same request/response envelope, so only the URL + auth header differ.
+ * Works with both Google Gemini (direct) and kie.ai native Gemini endpoints.
+ * The request/response envelope is identical; only URL and auth differ.
  */
 class GeminiClient(
     private val apiKey: String,
     private val provider: ApiProvider = ApiProvider.GOOGLE_GEMINI
 ) {
-
-    private val client = OkHttpClient()
+    private val client        = OkHttpClient()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    private val apiUrl: String
-        get() = if (provider.useBearerAuth) {
-            provider.baseUrl
-        } else {
-            "${provider.baseUrl}?key=$apiKey"
-        }
+    // ── URL builders ──────────────────────────────────────────────────────────
 
-    private fun buildRequest(body: RequestBody): Request {
-        val builder = Request.Builder().url(apiUrl).post(body)
-        if (provider.useBearerAuth) {
-            builder.addHeader("Authorization", "Bearer $apiKey")
-        }
-        return builder.build()
-    }
+    private fun mainUrl() = if (provider.useBearerAuth) provider.baseUrl
+                            else "${provider.baseUrl}?key=$apiKey"
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Step 1 — STT only. Returns raw Indonesian transcription.
-    //          Show this in the UI immediately while translation runs.
-    // ─────────────────────────────────────────────────────────────────────────
+    private fun ttsUrl()  = if (provider.useBearerAuth) provider.ttsUrl
+                            else "${provider.ttsUrl}?key=$apiKey"
+
+    private fun buildRequest(url: String, body: RequestBody): Request =
+        Request.Builder().url(url).post(body).apply {
+            if (provider.useBearerAuth) addHeader("Authorization", "Bearer $apiKey")
+        }.build()
+
+    // ── 1. Speech-to-text ─────────────────────────────────────────────────────
+
+    /**
+     * Transcribes Indonesian speech from [file] (AAC/MP4).
+     * Returns raw transcription text, or empty string if no speech detected.
+     */
     suspend fun transcribeAudio(file: File): String =
-        suspendCancellableCoroutine { continuation ->
+        suspendCancellableCoroutine { cont ->
             try {
-                val base64Audio = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
-
-                val promptText = """
+                val base64 = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+                val prompt  = """
                     Transcribe the Indonesian speech in this audio clip exactly as spoken.
-                    Return ONLY the raw transcription text — no labels, no JSON, no markdown,
-                    no explanations. If there is no speech, return an empty string.
+                    Return ONLY the raw transcription — no labels, no JSON, no markdown,
+                    no explanations. If there is no intelligible speech, return an empty string.
                 """.trimIndent()
 
                 val parts = JsonArray().apply {
-                    add(JsonObject().apply { addProperty("text", promptText) })
-                    add(JsonObject().apply {
-                        add("inlineData", JsonObject().apply {
-                            addProperty("mimeType", "audio/mp4")
-                            addProperty("data", base64Audio)
+                    add(textPart(prompt))
+                    add(audioPart(base64))
+                }
+                val req = buildRequest(mainUrl(), geminiBody(parts))
+                client.newCall(req).enqueue(simpleCallback(cont))
+            } catch (e: Exception) { cont.resumeWithException(e) }
+        }
+
+    // ── 2. Translation ────────────────────────────────────────────────────────
+
+    /**
+     * Translates [indonesianText] into [targetLanguage].
+     * Returns translated text only — no extra formatting.
+     */
+    suspend fun translateText(indonesianText: String, targetLanguage: String): String =
+        suspendCancellableCoroutine { cont ->
+            try {
+                val prompt = """
+                    Translate the following Indonesian text into $targetLanguage.
+                    Return ONLY the translated text. No explanations, no markdown, no quotes.
+
+                    Text:
+                    $indonesianText
+                """.trimIndent()
+
+                val parts = JsonArray().apply { add(textPart(prompt)) }
+                val req   = buildRequest(mainUrl(), geminiBody(parts))
+                client.newCall(req).enqueue(simpleCallback(cont))
+            } catch (e: Exception) { cont.resumeWithException(e) }
+        }
+
+    // ── 3. Text-to-speech ─────────────────────────────────────────────────────
+
+    /**
+     * Converts [text] to speech using the Gemini TTS model.
+     * Returns raw PCM bytes (16-bit signed, little-endian, mono, 24 kHz).
+     * Caller is responsible for wrapping in a WAV header before playback.
+     *
+     * Voice: "Kore" (neutral, clear — good for translated meeting content).
+     * Override [voiceName] to try others: Puck, Charon, Fenrir, Aoede, etc.
+     */
+    suspend fun generateTts(text: String, voiceName: String = "Kore"): ByteArray =
+        suspendCancellableCoroutine { cont ->
+            try {
+                val body = JsonObject().apply {
+                    add("contents", JsonArray().apply {
+                        add(JsonObject().apply {
+                            add("parts", JsonArray().apply { add(textPart(text)) })
+                        })
+                    })
+                    add("generationConfig", JsonObject().apply {
+                        add("responseModalities", JsonArray().apply { add("AUDIO") })
+                        add("speechConfig", JsonObject().apply {
+                            add("voiceConfig", JsonObject().apply {
+                                add("prebuiltVoiceConfig", JsonObject().apply {
+                                    addProperty("voiceName", voiceName)
+                                })
+                            })
                         })
                     })
                 }
 
-                val request = buildRequest(
-                    buildGeminiBody(parts).toString().toRequestBody(jsonMediaType)
-                )
-
-                client.newCall(request).enqueue(object : Callback {
+                val req = buildRequest(ttsUrl(), body.toString().toRequestBody(jsonMediaType))
+                client.newCall(req).enqueue(object : Callback {
                     override fun onFailure(call: Call, e: IOException) =
-                        continuation.resumeWithException(e)
+                        cont.resumeWithException(e)
 
                     override fun onResponse(call: Call, response: Response) {
                         response.use { res ->
                             if (!res.isSuccessful) {
-                                continuation.resumeWithException(
-                                    IOException("${provider.displayName} STT error ${res.code}: ${res.body?.string()}")
+                                cont.resumeWithException(
+                                    IOException("TTS error ${res.code}: ${res.body?.string()}")
                                 )
                                 return
                             }
                             try {
-                                continuation.resume(
-                                    extractTextFromResponse(res.body?.string() ?: "").trim()
-                                )
-                            } catch (e: Exception) {
-                                continuation.resumeWithException(e)
-                            }
+                                val json    = JsonParser.parseString(res.body?.string() ?: "").asJsonObject
+                                val b64pcm  = json.getAsJsonArray("candidates")
+                                    .get(0).asJsonObject
+                                    .getAsJsonObject("content")
+                                    .getAsJsonArray("parts")
+                                    .get(0).asJsonObject
+                                    .getAsJsonObject("inlineData")
+                                    .get("data").asString
+                                cont.resume(Base64.decode(b64pcm, Base64.NO_WRAP))
+                            } catch (e: Exception) { cont.resumeWithException(e) }
                         }
                     }
                 })
-            } catch (e: Exception) {
-                continuation.resumeWithException(e)
-            }
+            } catch (e: Exception) { cont.resumeWithException(e) }
         }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Step 2 — Translation only. Takes plain text, returns translated text.
-    //          Used after transcribeAudio() and in the edit/re-translate flow.
-    // ─────────────────────────────────────────────────────────────────────────
-    suspend fun translateText(indonesianText: String, targetLanguage: String): String =
-        suspendCancellableCoroutine { continuation ->
-            try {
-                val promptText = """
-                    Translate the following Indonesian text into $targetLanguage.
-                    Return ONLY the translated text. No explanations, no markdown, no quotes.
-                    
-                    Text to translate:
-                    $indonesianText
-                """.trimIndent()
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
-                val parts = JsonArray().apply {
-                    add(JsonObject().apply { addProperty("text", promptText) })
-                }
+    private fun textPart(text: String) = JsonObject().apply { addProperty("text", text) }
 
-                val request = buildRequest(
-                    buildGeminiBody(parts).toString().toRequestBody(jsonMediaType)
-                )
-
-                client.newCall(request).enqueue(object : Callback {
-                    override fun onFailure(call: Call, e: IOException) =
-                        continuation.resumeWithException(e)
-
-                    override fun onResponse(call: Call, response: Response) {
-                        response.use { res ->
-                            if (!res.isSuccessful) {
-                                continuation.resumeWithException(
-                                    IOException("${provider.displayName} translate error ${res.code}: ${res.body?.string()}")
-                                )
-                                return
-                            }
-                            try {
-                                continuation.resume(
-                                    extractTextFromResponse(res.body?.string() ?: "").trim()
-                                )
-                            } catch (e: Exception) {
-                                continuation.resumeWithException(e)
-                            }
-                        }
-                    }
-                })
-            } catch (e: Exception) {
-                continuation.resumeWithException(e)
-            }
-        }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Private helpers
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private fun buildGeminiBody(parts: JsonArray): JsonObject = JsonObject().apply {
-        add("contents", JsonArray().apply {
-            add(JsonObject().apply { add("parts", parts) })
+    private fun audioPart(base64: String) = JsonObject().apply {
+        add("inlineData", JsonObject().apply {
+            addProperty("mimeType", "audio/mp4")
+            addProperty("data", base64)
         })
     }
 
-    private fun extractTextFromResponse(responseBody: String): String {
-        val json = JsonParser.parseString(responseBody).asJsonObject
-        return json.getAsJsonArray("candidates")
-            .get(0).asJsonObject
-            .getAsJsonObject("content")
-            .getAsJsonArray("parts")
-            .get(0).asJsonObject
-            .get("text").asString
-            .trim()
-    }
+    private fun geminiBody(parts: JsonArray): RequestBody = JsonObject().apply {
+        add("contents", JsonArray().apply {
+            add(JsonObject().apply { add("parts", parts) })
+        })
+    }.toString().toRequestBody(jsonMediaType)
+
+    /** Callback that resumes a coroutine with extracted text or an exception. */
+    private fun simpleCallback(cont: kotlin.coroutines.Continuation<String>) =
+        object : Callback {
+            override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
+            override fun onResponse(call: Call, response: Response) {
+                response.use { res ->
+                    if (!res.isSuccessful) {
+                        cont.resumeWithException(
+                            IOException("${provider.displayName} error ${res.code}: ${res.body?.string()}")
+                        )
+                        return
+                    }
+                    try {
+                        val json = JsonParser.parseString(res.body?.string() ?: "").asJsonObject
+                        val text = json.getAsJsonArray("candidates")
+                            .get(0).asJsonObject
+                            .getAsJsonObject("content")
+                            .getAsJsonArray("parts")
+                            .get(0).asJsonObject
+                            .get("text").asString.trim()
+                        (cont as kotlin.coroutines.Continuation<String>).resume(text)
+                    } catch (e: Exception) { cont.resumeWithException(e) }
+                }
+            }
+        }
 }

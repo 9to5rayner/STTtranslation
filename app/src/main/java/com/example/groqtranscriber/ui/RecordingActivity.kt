@@ -1,13 +1,16 @@
 package com.example.groqtranscriber.ui
 
 import android.Manifest
+import android.animation.ObjectAnimator
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -20,7 +23,9 @@ import com.example.groqtranscriber.api.ApiProvider
 import com.example.groqtranscriber.api.GeminiClient
 import com.example.groqtranscriber.audio.AudioChunker
 import com.example.groqtranscriber.audio.AudioRecorder
+import com.example.groqtranscriber.audio.WavWriter
 import com.example.groqtranscriber.model.SessionData
+import com.example.groqtranscriber.model.SessionStore
 import com.example.groqtranscriber.model.TranscriptEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,264 +36,339 @@ import java.io.File
 
 class RecordingActivity : AppCompatActivity() {
 
-    private lateinit var audioRecorder: AudioRecorder
-    private lateinit var audioChunker: AudioChunker
-    private lateinit var geminiClient: GeminiClient
-    private lateinit var targetLang: String
-    private lateinit var provider: ApiProvider
+    // ── Dependencies ──────────────────────────────────────────────────────────
+    private lateinit var audioRecorder:  AudioRecorder
+    private lateinit var audioChunker:   AudioChunker
+    private lateinit var geminiClient:   GeminiClient
+    private lateinit var targetLang:     String
+    private lateinit var provider:       ApiProvider
+    private var mediaPlayer:             MediaPlayer? = null
 
-    // Recording state machine
-    private var hasStarted      = false   // user tapped Start at least once
-    private var isActive        = false   // currently recording chunks
-    private var isPaused        = false
-    private var isSongSkipped   = false
+    // ── State ─────────────────────────────────────────────────────────────────
+    private var isRecording       = false
+    private var recordingFile:      File? = null
+    private var elapsedSeconds    = 0
+    private val handler           = Handler(Looper.getMainLooper())
+    private var blinkAnimator:      ObjectAnimator? = null
 
-    private var chunkIndex       = 0
-    private var sessionStartTime = 0L
+    // ── Coroutines ────────────────────────────────────────────────────────────
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val scope   = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val handler = Handler(Looper.getMainLooper())
+    // ── Views ─────────────────────────────────────────────────────────────────
+    private lateinit var tvStatus:    TextView
+    private lateinit var tvTimer:     TextView
+    private lateinit var btnRecord:   Button
+    private lateinit var btnExport:   Button
+    private lateinit var btnClear:    Button
+    private lateinit var rvFeed:      RecyclerView
+    private lateinit var adapter:     BubbleAdapter
 
-    // Views
-    private lateinit var tvStatus:        TextView
-    private lateinit var btnStart:        Button
-    private lateinit var btnPause:        Button
-    private lateinit var btnSkip:         Button
-    private lateinit var btnEnd:          Button
-    private lateinit var rvTranscript:    RecyclerView
-    private lateinit var transcriptAdapter: LiveTranscriptAdapter
-
+    // ─────────────────────────────────────────────────────────────────────────
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_recording)
 
-        tvStatus     = findViewById(R.id.tvStatus)
-        btnStart     = findViewById(R.id.btnStart)
-        btnPause     = findViewById(R.id.btnPause)
-        btnSkip      = findViewById(R.id.btnSkip)
-        btnEnd       = findViewById(R.id.btnEnd)
-        rvTranscript = findViewById(R.id.rvTranscriptLog)
+        tvStatus  = findViewById(R.id.tvStatus)
+        tvTimer   = findViewById(R.id.tvTimer)
+        btnRecord = findViewById(R.id.btnRecord)
+        btnExport = findViewById(R.id.btnExport)
+        btnClear  = findViewById(R.id.btnClear)
+        rvFeed    = findViewById(R.id.rvFeed)
 
+        // ── Resolve API settings ──────────────────────────────────────────────
         val prefs  = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("api_key", "") ?: ""
         if (apiKey.isEmpty()) {
-            Toast.makeText(this, "No API key found — please go back.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "No API key — please go back.", Toast.LENGTH_LONG).show()
             finish(); return
         }
 
         val providerName = intent.getStringExtra("API_PROVIDER") ?: ApiProvider.GOOGLE_GEMINI.name
         provider = try { ApiProvider.valueOf(providerName) }
-                   catch (e: IllegalArgumentException) { ApiProvider.GOOGLE_GEMINI }
+                   catch (_: IllegalArgumentException) { ApiProvider.GOOGLE_GEMINI }
 
+        targetLang   = intent.getStringExtra("TARGET_LANG") ?: "English"
         geminiClient = GeminiClient(apiKey, provider)
         audioRecorder = AudioRecorder(this)
         audioChunker  = AudioChunker(this)
-        targetLang    = intent.getStringExtra("TARGET_LANG") ?: "English"
 
-        SessionData.clear()
+        // ── Load persisted history ────────────────────────────────────────────
+        SessionData.entries.clear()
+        SessionData.entries.addAll(SessionStore.load(this))
 
-        // RecyclerView
-        transcriptAdapter = LiveTranscriptAdapter(this, targetLang, geminiClient, scope)
-        rvTranscript.apply {
-            adapter       = transcriptAdapter
+        // ── RecyclerView ──────────────────────────────────────────────────────
+        adapter = BubbleAdapter(
+            context       = this,
+            geminiClient  = geminiClient,
+            targetLang    = targetLang,
+            scope         = scope,
+            onPlayRequest = { filePath -> playAudio(filePath) },
+            onEntryUpdated = { index, entry ->
+                SessionData.entries[index] = entry
+                SessionStore.save(this, SessionData.entries)
+            }
+        )
+        rvFeed.apply {
+            adapter       = this@RecordingActivity.adapter
             layoutManager = LinearLayoutManager(this@RecordingActivity)
                 .also { it.stackFromEnd = true }
         }
-
-        // Initial idle state
-        showIdleState()
-
-        // ── Button wiring ───────────────────────────────────────────────────
-
-        btnStart.setOnClickListener {
-            if (!hasStarted) {
-                requestRecordPermissionOrStart()
-            }
+        if (SessionData.entries.isNotEmpty()) {
+            adapter.notifyDataSetChanged()
+            rvFeed.scrollToPosition(SessionData.entries.size - 1)
         }
 
-        btnPause.setOnClickListener {
-            if (!isActive && !isPaused) return@setOnClickListener
-            if (isPaused) {
-                resumeSession()
-            } else {
-                pauseSession()
-            }
+        // ── Button wiring ─────────────────────────────────────────────────────
+        btnRecord.setOnClickListener {
+            if (isRecording) stopRecording() else requestPermissionAndRecord()
         }
 
-        btnSkip.setOnClickListener {
-            if (!hasStarted) return@setOnClickListener
-            if (isSongSkipped) {
-                isSongSkipped = false
-                btnSkip.text  = "Skip Song"
-                resumeSession()
-            } else {
-                isSongSkipped = true
-                btnSkip.text  = "Resume Music"
-                pauseSession()
-                tvStatus.text = "⏭️  Song skipped — not recording"
-            }
+        btnExport.setOnClickListener {
+            startActivity(Intent(this, ExportActivity::class.java).apply {
+                putExtra("TARGET_LANG",  targetLang)
+                putExtra("API_PROVIDER", provider.name)
+            })
         }
 
-        btnEnd.setOnClickListener {
-            stopEverything()
-            startActivity(
-                Intent(this, ExportActivity::class.java).apply {
-                    putExtra("TARGET_LANG",  targetLang)
-                    putExtra("API_PROVIDER", provider.name)
-                }
-            )
-            finish()
+        btnClear.setOnClickListener {
+            SessionData.clear()
+            SessionStore.clear(this)
+            adapter.notifyDataSetChanged()
+            tvStatus.text = "History cleared"
         }
+
+        setIdleUi()
     }
 
-    // ── State helpers ────────────────────────────────────────────────────────
+    // ── Recording lifecycle ───────────────────────────────────────────────────
 
-    private fun showIdleState() {
-        tvStatus.text        = "Ready — tap Start to begin"
-        btnStart.visibility  = View.VISIBLE
-        btnPause.visibility  = View.GONE
-        btnPause.isEnabled   = false
-        btnSkip.isEnabled    = false
-        btnEnd.isEnabled     = false
-    }
-
-    private fun showRecordingState() {
-        tvStatus.text        = "🔴 Recording · ${provider.displayName}"
-        btnStart.visibility  = View.GONE
-        btnPause.visibility  = View.VISIBLE
-        btnPause.text        = "Pause"
-        btnPause.isEnabled   = true
-        btnSkip.isEnabled    = true
-        btnEnd.isEnabled     = true
-    }
-
-    private fun pauseSession() {
-        isPaused = true
-        isActive = false
-        audioRecorder.stopRecording()
-        handler.removeCallbacksAndMessages(null)
-        tvStatus.text   = "⏸️  Paused"
-        btnPause.text   = "Resume"
-    }
-
-    private fun resumeSession() {
-        isPaused      = false
-        isSongSkipped = false
-        btnSkip.text  = "Skip Song"
-        startChunkCycle()
-    }
-
-    // ── Permission + start ───────────────────────────────────────────────────
-
-    private fun requestRecordPermissionOrStart() {
+    private fun requestPermissionAndRecord() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
             ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.RECORD_AUDIO),
-                REQUEST_AUDIO_PERMISSION
+                this, arrayOf(Manifest.permission.RECORD_AUDIO), RC_AUDIO
             )
         } else {
-            beginSession()
+            startRecording()
         }
     }
 
     override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_AUDIO_PERMISSION) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                beginSession()
-            } else {
-                Toast.makeText(this, "Microphone permission required.", Toast.LENGTH_LONG).show()
+        if (requestCode == RC_AUDIO &&
+            grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+        ) startRecording()
+        else Toast.makeText(this, "Microphone permission required.", Toast.LENGTH_LONG).show()
+    }
+
+    private fun startRecording() {
+        isRecording    = true
+        elapsedSeconds = 0
+        recordingFile  = audioChunker.createChunkFile(0)
+
+        audioRecorder.startRecording(recordingFile!!)
+        setRecordingUi()
+        startTimer()
+    }
+
+    private fun stopRecording() {
+        if (!isRecording) return
+        isRecording = false
+        handler.removeCallbacksAndMessages(null)
+        blinkAnimator?.cancel()
+        audioRecorder.stopRecording()
+
+        setProcessingUi()
+
+        val file = recordingFile ?: return
+        val now  = System.currentTimeMillis()
+        processRecording(file, now - (elapsedSeconds * 1000L), now)
+    }
+
+    // ── Timer ─────────────────────────────────────────────────────────────────
+
+    private val timerRunnable = object : Runnable {
+        override fun run() {
+            elapsedSeconds++
+            val remaining = MAX_SECONDS - elapsedSeconds
+            tvTimer.text = formatTime(elapsedSeconds)
+
+            when {
+                remaining <= 0 -> {
+                    // Auto-stop at 60 s
+                    stopRecording()
+                    return
+                }
+                remaining <= WARNING_SECONDS -> startBlinking()
             }
+            handler.postDelayed(this, 1_000)
         }
     }
 
-    private fun beginSession() {
-        hasStarted       = true
-        sessionStartTime = System.currentTimeMillis()
-        showRecordingState()
-        startChunkCycle()
+    private fun startTimer() {
+        tvTimer.text = formatTime(0)
+        handler.postDelayed(timerRunnable, 1_000)
     }
 
-    // ── Chunk cycle ──────────────────────────────────────────────────────────
-
-    private fun startChunkCycle() {
-        if (isPaused || isSongSkipped) return
-        isActive = true
-        showRecordingState()
-
-        val chunkStart = System.currentTimeMillis() - sessionStartTime
-        val chunkFile  = audioChunker.createChunkFile(chunkIndex++)
-
-        audioRecorder.startRecording(chunkFile)
-
-        handler.postDelayed({
-            audioRecorder.stopRecording()
-            val chunkEnd = System.currentTimeMillis() - sessionStartTime
-            processChunk(chunkFile, chunkStart, chunkEnd)
-            // Keep rolling unless paused/skipped/ended
-            if (isActive && !isPaused && !isSongSkipped) startChunkCycle()
-        }, CHUNK_DURATION_MS)
+    private fun startBlinking() {
+        if (blinkAnimator?.isRunning == true) return
+        blinkAnimator = ObjectAnimator.ofFloat(btnRecord, "alpha", 1f, 0.2f).apply {
+            duration       = 500
+            repeatCount    = ObjectAnimator.INFINITE
+            repeatMode     = ObjectAnimator.REVERSE
+            interpolator   = LinearInterpolator()
+            start()
+        }
     }
 
-    // ── Two-phase processing: transcribe first, show bubble, then translate ──
+    private fun formatTime(seconds: Int): String {
+        val remaining = MAX_SECONDS - seconds
+        return "%d:%02d".format(remaining / 60, remaining % 60)
+    }
 
-    private fun processChunk(file: File, start: Long, end: Long) {
+    // ── Three-phase pipeline ──────────────────────────────────────────────────
+
+    private fun processRecording(file: File, startMs: Long, endMs: Long) {
         scope.launch {
-            try {
-                // ── Phase 1: transcription ──────────────────────────────────
-                val originalText = withContext(Dispatchers.IO) {
-                    geminiClient.transcribeAudio(file)
-                }
+            // Add placeholder entry in TRANSCRIBING state
+            val placeholder = TranscriptEntry(
+                timestampStart  = startMs,
+                timestampEnd    = endMs,
+                isTranscribing  = true
+            )
+            SessionData.entries.add(placeholder)
+            val index = SessionData.entries.size - 1
+            adapter.notifyItemInserted(index)
+            rvFeed.smoothScrollToPosition(index)
 
-                if (originalText.isBlank()) {
-                    // Nothing spoken — skip silently
-                    withContext(Dispatchers.IO) { audioChunker.safelyDeleteChunk(file) }
+            // ── Phase 1: Transcription ────────────────────────────────────────
+            try {
+                val original = withContext(Dispatchers.IO) { geminiClient.transcribeAudio(file) }
+                withContext(Dispatchers.IO) { audioChunker.safelyDeleteChunk(file) }
+
+                if (original.isBlank()) {
+                    // Silent clip — remove placeholder
+                    SessionData.entries.removeAt(index)
+                    adapter.notifyItemRemoved(index)
+                    setIdleUi()
                     return@launch
                 }
 
-                // Show Indonesian bubble immediately, translation pending
-                val entry = TranscriptEntry(
-                    timestampStart = start,
-                    timestampEnd   = end,
-                    originalText   = originalText,
-                    translatedText = "",
+                // Show navy Indonesian bubble (translation pending)
+                SessionData.entries[index] = SessionData.entries[index].copy(
+                    originalText   = original,
+                    isTranscribing = false,
                     isTranslating  = true
                 )
-                // appendAndTranslate adds the entry, notifies, AND kicks off translation
-                transcriptAdapter.appendAndTranslate(entry)
-                rvTranscript.smoothScrollToPosition(SessionData.entries.size - 1)
+                adapter.notifyItemChanged(index)
+                setIdleUi()
+
+                // ── Phase 2: Translation ──────────────────────────────────────
+                val translated = try {
+                    withContext(Dispatchers.IO) { geminiClient.translateText(original, targetLang) }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    "[Translation failed: ${e.message}]"
+                }
+
+                SessionData.entries[index] = SessionData.entries[index].copy(
+                    translatedText = translated,
+                    isTranslating  = false,
+                    isGeneratingTts = true
+                )
+                adapter.notifyItemChanged(index)
+
+                // ── Phase 3: TTS ──────────────────────────────────────────────
+                val audioPath = try {
+                    val pcm     = withContext(Dispatchers.IO) { geminiClient.generateTts(translated) }
+                    val wavFile = File(filesDir, "tts_${SessionData.entries[index].id}.wav")
+                    withContext(Dispatchers.IO) { WavWriter.write(pcm, wavFile) }
+                    wavFile.absolutePath
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    null
+                }
+
+                SessionData.entries[index] = SessionData.entries[index].copy(
+                    audioFilePath   = audioPath,
+                    isGeneratingTts = false
+                )
+                adapter.notifyItemChanged(index)
+                SessionStore.save(this@RecordingActivity, SessionData.entries)
 
             } catch (e: Exception) {
                 e.printStackTrace()
-                tvStatus.text = "⚠️ Error: ${e.message?.take(60)}"
-            } finally {
+                tvStatus.text = "⚠️ Error: ${e.message?.take(80)}"
+                // Remove failed placeholder
+                if (index < SessionData.entries.size) {
+                    SessionData.entries.removeAt(index)
+                    adapter.notifyItemRemoved(index)
+                }
                 withContext(Dispatchers.IO) { audioChunker.safelyDeleteChunk(file) }
+                setIdleUi()
             }
         }
     }
 
-    // ── Cleanup ──────────────────────────────────────────────────────────────
+    // ── Audio playback ────────────────────────────────────────────────────────
 
-    private fun stopEverything() {
-        isActive = false
-        handler.removeCallbacksAndMessages(null)
-        audioRecorder.stopRecording()
+    fun playAudio(filePath: String) {
+        mediaPlayer?.release()
+        mediaPlayer = null
+        try {
+            mediaPlayer = MediaPlayer().apply {
+                setDataSource(filePath)
+                prepare()
+                start()
+                setOnCompletionListener { release(); mediaPlayer = null }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Playback error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
+
+    // ── UI states ─────────────────────────────────────────────────────────────
+
+    private fun setIdleUi() {
+        tvStatus.text    = "Ready · ${provider.displayName}"
+        tvTimer.text     = formatTime(0)
+        btnRecord.text   = "⏺  Record"
+        btnRecord.alpha  = 1f
+        btnRecord.setBackgroundColor(getColor(R.color.gold_primary))
+        btnRecord.isEnabled = true
+    }
+
+    private fun setRecordingUi() {
+        tvStatus.text  = "🔴 Recording…"
+        btnRecord.text = "⏹  Stop"
+        btnRecord.setBackgroundColor(getColor(R.color.recording_red))
+    }
+
+    private fun setProcessingUi() {
+        tvStatus.text       = "⏳ Processing…"
+        btnRecord.text      = "⏺  Record"
+        btnRecord.isEnabled = false
+        btnRecord.alpha     = 0.5f
+        tvTimer.text        = formatTime(0)
+    }
+
+    // ── Cleanup ───────────────────────────────────────────────────────────────
 
     override fun onDestroy() {
         super.onDestroy()
-        stopEverything()
+        handler.removeCallbacksAndMessages(null)
+        blinkAnimator?.cancel()
+        if (isRecording) audioRecorder.stopRecording()
+        mediaPlayer?.release()
     }
 
     companion object {
-        private const val REQUEST_AUDIO_PERMISSION = 200
-        private const val CHUNK_DURATION_MS        = 8_000L   // 8 s — faster first result
+        private const val RC_AUDIO          = 200
+        private const val MAX_SECONDS       = 60
+        private const val WARNING_SECONDS   = 10
     }
 }
