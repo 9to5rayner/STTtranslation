@@ -16,12 +16,20 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 /**
  * All LLM API calls — STT, translation, and TTS — in one place.
  *
- * Works with both Google Gemini (direct) and kie.ai native Gemini endpoints.
- * The request/response envelope is identical; only URL and auth differ.
+ * STT + translation: works with both Google Gemini (direct) and kie.ai
+ * native Gemini endpoints — the request/response envelope is identical;
+ * only URL and auth differ.
+ *
+ * TTS: branches by provider.
+ *  - GOOGLE_GEMINI  → native Gemini TTS (generateContent w/ AUDIO modality).
+ *  - KIE_AI_GEMINI  → delegates to [easyVoiceClient], since kie.ai has no
+ *                     Gemini TTS-capable model. Requires a separate API key
+ *                     (see [ApiProvider.needsSeparateTtsKey]).
  */
 class GeminiClient(
     private val apiKey: String,
-    private val provider: ApiProvider = ApiProvider.GOOGLE_GEMINI
+    private val provider: ApiProvider = ApiProvider.GOOGLE_GEMINI,
+    private val easyVoiceClient: EasyVoiceClient? = null
 ) {
     private val client        = OkHttpClient()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -90,14 +98,38 @@ class GeminiClient(
     // ── 3. Text-to-speech ─────────────────────────────────────────────────────
 
     /**
-     * Converts [text] to speech using the Gemini TTS model.
-     * Returns raw PCM bytes (16-bit signed, little-endian, mono, 24 kHz).
-     * Caller is responsible for wrapping in a WAV header before playback.
+     * Converts [text] to speech.
      *
-     * Voice: "Kore" (neutral, clear — good for translated meeting content).
-     * Override [voiceName] to try others: Puck, Charon, Fenrir, Aoede, etc.
+     * Returns bytes ready to write DIRECTLY to a .wav file:
+     *  - GOOGLE_GEMINI path returns raw 16-bit/24kHz PCM, which the caller
+     *    must wrap with [com.example.groqtranscriber.audio.WavWriter] first.
+     *  - KIE_AI_GEMINI (EasyVoice) path returns a COMPLETE wav file already —
+     *    do NOT pass it through WavWriter, just write it as-is.
+     *
+     * Callers should check `provider.useNativeGeminiTts` to know which case
+     * they're in (see [TtsResult] used by BubbleAdapter/RecordingActivity).
+     *
+     * Voice (Gemini path): "Kore" (neutral, clear). Override [voiceName] to
+     * try others: Puck, Charon, Fenrir, Aoede, etc.
+     * Voice (EasyVoice path): "af_heart" by default; override [voiceName]
+     * with any EasyVoice voice ID.
+     *
+     * Throws [TtsException] with a specific, human-readable reason on failure.
      */
-    suspend fun generateTts(text: String, voiceName: String = "Kore"): ByteArray =
+    suspend fun generateTts(text: String, voiceName: String? = null): ByteArray {
+        if (!provider.useNativeGeminiTts) {
+            val evClient = easyVoiceClient
+                ?: throw TtsException(
+                    "No EasyVoice API key configured for ${provider.displayName}. " +
+                    "Add a TTS API key on the launch screen."
+                )
+            return evClient.generateSpeech(text, voice = voiceName ?: "af_heart")
+        }
+        return generateGeminiTts(text, voiceName ?: "Kore")
+    }
+
+    /** Native Gemini TTS — unchanged from before, just extracted into its own function. */
+    private suspend fun generateGeminiTts(text: String, voiceName: String): ByteArray =
         suspendCancellableCoroutine { cont ->
             try {
                 val body = JsonObject().apply {
@@ -121,32 +153,93 @@ class GeminiClient(
                 val req = buildRequest(ttsUrl(), body.toString().toRequestBody(jsonMediaType))
                 client.newCall(req).enqueue(object : Callback {
                     override fun onFailure(call: Call, e: IOException) =
-                        cont.resumeWithException(e)
+                        cont.resumeWithException(TtsException("Network error: ${e.message}", e))
 
                     override fun onResponse(call: Call, response: Response) {
                         response.use { res ->
+                            val rawBody = try { res.body?.string() } catch (e: Exception) { null }
+
                             if (!res.isSuccessful) {
                                 cont.resumeWithException(
-                                    IOException("TTS error ${res.code}: ${res.body?.string()}")
+                                    TtsException("TTS error ${res.code}: ${rawBody?.take(300)}")
                                 )
                                 return
                             }
+                            if (rawBody.isNullOrBlank()) {
+                                cont.resumeWithException(TtsException("TTS returned an empty response."))
+                                return
+                            }
+
                             try {
-                                val json    = JsonParser.parseString(res.body?.string() ?: "").asJsonObject
-                                val b64pcm  = json.getAsJsonArray("candidates")
-                                    .get(0).asJsonObject
+                                val json = JsonParser.parseString(rawBody).asJsonObject
+
+                                val candidates = json.getAsJsonArray("candidates")
+                                if (candidates == null || candidates.size() == 0) {
+                                    cont.resumeWithException(
+                                        TtsException("TTS response had no candidates (possibly blocked content).")
+                                    )
+                                    return
+                                }
+
+                                val partsArray = candidates.get(0).asJsonObject
                                     .getAsJsonObject("content")
-                                    .getAsJsonArray("parts")
-                                    .get(0).asJsonObject
-                                    .getAsJsonObject("inlineData")
-                                    .get("data").asString
+                                    ?.getAsJsonArray("parts")
+
+                                if (partsArray == null || partsArray.size() == 0) {
+                                    cont.resumeWithException(
+                                        TtsException("TTS response had no content parts.")
+                                    )
+                                    return
+                                }
+
+                                val firstPart = partsArray.get(0).asJsonObject
+                                val inlineData = firstPart.getAsJsonObject("inlineData")
+
+                                if (inlineData == null) {
+                                    val textFallback = firstPart.get("text")?.asString
+                                    cont.resumeWithException(
+                                        TtsException(
+                                            "Model did not return audio — it returned " +
+                                            (if (textFallback != null) "text instead (\"${textFallback.take(80)}\")."
+                                             else "no inlineData field.") +
+                                            " Check that the configured TTS model/URL actually supports audio output."
+                                        )
+                                    )
+                                    return
+                                }
+
+                                val b64pcm = inlineData.get("data")?.asString
+                                if (b64pcm.isNullOrBlank()) {
+                                    cont.resumeWithException(TtsException("TTS inlineData had no audio bytes."))
+                                    return
+                                }
+
                                 cont.resume(Base64.decode(b64pcm, Base64.NO_WRAP))
-                            } catch (e: Exception) { cont.resumeWithException(e) }
+                            } catch (e: Exception) {
+                                cont.resumeWithException(TtsException("Failed to parse TTS response: ${e.message}", e))
+                            }
                         }
                     }
                 })
-            } catch (e: Exception) { cont.resumeWithException(e) }
+            } catch (e: Exception) { cont.resumeWithException(TtsException("TTS request setup failed: ${e.message}", e)) }
         }
+
+    /**
+     * Writes the bytes returned by [generateTts] to [outputFile] correctly,
+     * regardless of which provider/path produced them:
+     *  - Native Gemini TTS bytes are raw PCM → wrapped with [WavWriter].
+     *  - EasyVoice bytes are already a complete WAV file → written as-is.
+     *
+     * Centralizing this here means callers never need to know or branch on
+     * `provider.useNativeGeminiTts` themselves.
+     */
+    fun writeTtsBytesToWav(ttsBytes: ByteArray, outputFile: File) {
+        if (provider.useNativeGeminiTts) {
+            com.example.groqtranscriber.audio.WavWriter.write(ttsBytes, outputFile)
+        } else {
+            outputFile.writeBytes(ttsBytes)
+        }
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -191,3 +284,11 @@ class GeminiClient(
             }
         }
 }
+
+/**
+ * Thrown by [GeminiClient.generateTts] / [EasyVoiceClient.generateSpeech]
+ * with a specific, user-presentable reason for the failure (network error,
+ * HTTP error, blocked content, model returned text instead of audio,
+ * missing API key, malformed response, etc.).
+ */
+class TtsException(message: String, cause: Throwable? = null) : Exception(message, cause)

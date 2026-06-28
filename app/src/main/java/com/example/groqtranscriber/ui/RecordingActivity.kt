@@ -20,10 +20,11 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.groqtranscriber.R
 import com.example.groqtranscriber.api.ApiProvider
+import com.example.groqtranscriber.api.EasyVoiceClient
 import com.example.groqtranscriber.api.GeminiClient
+import com.example.groqtranscriber.api.TtsException
 import com.example.groqtranscriber.audio.AudioChunker
 import com.example.groqtranscriber.audio.AudioRecorder
-import com.example.groqtranscriber.audio.WavWriter
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.SessionStore
 import com.example.groqtranscriber.model.TranscriptEntry
@@ -87,8 +88,25 @@ class RecordingActivity : AppCompatActivity() {
         provider = try { ApiProvider.valueOf(providerName) }
                    catch (_: IllegalArgumentException) { ApiProvider.GOOGLE_GEMINI }
 
+        // ── Resolve TTS backend (native Gemini vs. EasyVoice) ───────────────────
+        // kie.ai has no Gemini TTS model, so that provider's audio generation is
+        // delegated to EasyVoice using a separate key (see ApiProvider.needsSeparateTtsKey
+        // and LaunchActivity's second key field).
+        val easyVoiceClient: EasyVoiceClient? = if (provider.needsSeparateTtsKey) {
+            val ttsKey = prefs.getString("tts_api_key", "") ?: ""
+            if (ttsKey.isEmpty()) {
+                Toast.makeText(
+                    this,
+                    "No TTS API key configured for ${provider.displayName} — please go back and add one.",
+                    Toast.LENGTH_LONG
+                ).show()
+                finish(); return
+            }
+            EasyVoiceClient(ttsKey)
+        } else null
+
         targetLang   = intent.getStringExtra("TARGET_LANG") ?: "English"
-        geminiClient = GeminiClient(apiKey, provider)
+        geminiClient = GeminiClient(apiKey, provider, easyVoiceClient)
         audioRecorder = AudioRecorder(this)
         audioChunker  = AudioChunker(this)
 
@@ -283,22 +301,46 @@ class RecordingActivity : AppCompatActivity() {
                 adapter.notifyItemChanged(index)
 
                 // ── Phase 3: TTS ──────────────────────────────────────────────
-                val audioPath = try {
-                    val pcm     = withContext(Dispatchers.IO) { geminiClient.generateTts(translated) }
-                    val wavFile = File(filesDir, "tts_${SessionData.entries[index].id}.wav")
-                    withContext(Dispatchers.IO) { WavWriter.write(pcm, wavFile) }
-                    wavFile.absolutePath
+                // Records the specific failure reason on ttsError (instead of
+                // silently leaving audioFilePath null) so the UI can show an
+                // error tag + retry button (see BubbleAdapter.retryTts).
+                // writeTtsBytesToWav() handles the byte-format difference
+                // between native Gemini TTS (raw PCM, needs a WAV header) and
+                // EasyVoice (already a complete WAV file) — callers don't need
+                // to know which path produced the bytes.
+                val ttsResult: Result<String> = try {
+                    val ttsBytes = withContext(Dispatchers.IO) { geminiClient.generateTts(translated) }
+                    val wavFile  = File(filesDir, "tts_${SessionData.entries[index].id}.wav")
+                    withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToWav(ttsBytes, wavFile) }
+                    Result.success(wavFile.absolutePath)
+                } catch (e: TtsException) {
+                    e.printStackTrace()
+                    Result.failure(e)
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    null
+                    Result.failure(e)
                 }
 
-                SessionData.entries[index] = SessionData.entries[index].copy(
-                    audioFilePath   = audioPath,
-                    isGeneratingTts = false
-                )
-                adapter.notifyItemChanged(index)
-                SessionStore.save(this@RecordingActivity, SessionData.entries)
+                if (index < SessionData.entries.size) {
+                    SessionData.entries[index] = ttsResult.fold(
+                        onSuccess = { path ->
+                            SessionData.entries[index].copy(
+                                audioFilePath   = path,
+                                isGeneratingTts = false,
+                                ttsError        = null
+                            )
+                        },
+                        onFailure = { err ->
+                            SessionData.entries[index].copy(
+                                audioFilePath   = null,
+                                isGeneratingTts = false,
+                                ttsError        = (err.message ?: "Unknown error").take(140)
+                            )
+                        }
+                    )
+                    adapter.notifyItemChanged(index)
+                    SessionStore.save(this@RecordingActivity, SessionData.entries)
+                }
 
             } catch (e: Exception) {
                 e.printStackTrace()

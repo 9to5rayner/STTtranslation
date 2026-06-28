@@ -13,9 +13,9 @@ import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 import com.example.groqtranscriber.R
 import com.example.groqtranscriber.api.GeminiClient
+import com.example.groqtranscriber.api.TtsException
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.TranscriptEntry
-import com.example.groqtranscriber.audio.WavWriter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -32,12 +32,19 @@ import java.io.File
  *   ┌─────────────────────────────────────────┐  ← gold bubble (translation)
  *   │ 🌐  Good morning brothers and sisters…  │  ▶
  *   └─────────────────────────────────────────┘
+ *   ⚠️ Audio failed — tap ↻ to retry            ← only if TTS failed
  *
  * State indicators:
  *   • isTranscribing  → "Transcribing…" shimmer, no bubbles yet
  *   • isTranslating   → navy bubble visible, "Translating…" below
  *   • isGeneratingTts → gold bubble visible, "Generating audio…" below play button
  *   • audioFilePath set → ▶ Play button active
+ *   • ttsError set      → ⚠️ error row + ↻ retry button, play button disabled
+ *
+ * TTS generation itself is provider-agnostic from this class's point of view —
+ * geminiClient.generateTts() + geminiClient.writeTtsBytesToWav() handle the
+ * difference between native Gemini TTS (raw PCM) and EasyVoice (complete WAV
+ * file) internally.
  */
 class BubbleAdapter(
     private val context:        Context,
@@ -62,11 +69,14 @@ class BubbleAdapter(
         val llGoldRow:      LinearLayout = view.findViewById(R.id.llGoldRow)
         val tvTranslation:  TextView     = view.findViewById(R.id.tvTranslation)
         val btnPlay:        ImageButton  = view.findViewById(R.id.btnPlay)
+        val btnRetryTts:    ImageButton  = view.findViewById(R.id.btnRetryTts)
 
         // Status rows
         val llTranscribing: LinearLayout = view.findViewById(R.id.llTranscribing)
         val llTranslating:  LinearLayout = view.findViewById(R.id.llTranslating)
         val llTtsLoading:   LinearLayout = view.findViewById(R.id.llTtsLoading)
+        val llTtsError:     LinearLayout = view.findViewById(R.id.llTtsError)
+        val tvTtsError:     TextView     = view.findViewById(R.id.tvTtsError)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
@@ -101,6 +111,19 @@ class BubbleAdapter(
         // ── TTS loading row ───────────────────────────────────────────────────
         h.llTtsLoading.visibility = if (e.isGeneratingTts) View.VISIBLE else View.GONE
 
+        // ── TTS error row + retry button ──────────────────────────────────────
+        val hasTtsError = e.ttsError != null && !e.isGeneratingTts
+        h.llTtsError.visibility = if (hasTtsError) View.VISIBLE else View.GONE
+        if (hasTtsError) {
+            h.tvTtsError.text = "⚠️ Audio failed: ${e.ttsError}"
+        }
+        h.btnRetryTts.visibility = if (hasTtsError) View.VISIBLE else View.GONE
+        h.btnRetryTts.setOnClickListener {
+            val p = h.adapterPosition
+            if (p == RecyclerView.NO_POSITION || p >= SessionData.entries.size) return@setOnClickListener
+            retryTts(p)
+        }
+
         // ── Play button ───────────────────────────────────────────────────────
         h.btnPlay.visibility  = if (hasTranslation && !e.isGeneratingTts) View.VISIBLE else View.GONE
         h.btnPlay.isEnabled   = e.audioFilePath != null
@@ -114,11 +137,80 @@ class BubbleAdapter(
         h.tvEditHint.visibility = if (e.originalText.isNotEmpty()) View.VISIBLE else View.GONE
         h.itemView.setOnClickListener {
             val p = h.adapterPosition
-            if (p == RecyclerView.NO_ID.toInt() || p >= SessionData.entries.size) return@setOnClickListener
+            if (p == RecyclerView.NO_POSITION || p >= SessionData.entries.size) return@setOnClickListener
             val entry = SessionData.entries[p]
             if (entry.isTranscribing || entry.isTranslating || entry.isGeneratingTts) return@setOnClickListener
             showEditDialog(h, entry, p)
         }
+    }
+
+    // ── TTS retry ─────────────────────────────────────────────────────────────
+
+    /**
+     * Re-runs only the TTS phase for the entry at [index], using its current
+     * translatedText. Clears any previous error and shows the loading row
+     * while it runs. Safe to call from the bubble's own retry button.
+     */
+    fun retryTts(index: Int) {
+        if (index < 0 || index >= SessionData.entries.size) return
+        val entry = SessionData.entries[index]
+        if (entry.translatedText.isEmpty() || entry.isGeneratingTts) return
+
+        val withLoading = entry.copy(isGeneratingTts = true, ttsError = null)
+        SessionData.entries[index] = withLoading
+        notifyItemChanged(index)
+        onEntryUpdated(index, withLoading)
+
+        scope.launch {
+            runTtsPhase(index, entry.translatedText)
+        }
+    }
+
+    /**
+     * Runs TTS generation for [translatedText] and writes the result (success
+     * or failure) back into SessionData.entries[index]. Shared by the initial
+     * pipeline-completion path (applyEdit) and the manual retry path so both
+     * report errors the same way instead of one of them swallowing to null.
+     *
+     * geminiClient.generateTts() + geminiClient.writeTtsBytesToWav() handle
+     * the byte-format difference between native Gemini TTS and EasyVoice
+     * internally — this function doesn't need to know which provider is active.
+     */
+    private suspend fun runTtsPhase(index: Int, translatedText: String) {
+        if (index >= SessionData.entries.size) return
+
+        val result: Result<String> = try {
+            val ttsBytes = withContext(Dispatchers.IO) { geminiClient.generateTts(translatedText) }
+            val wavFile = File(context.filesDir, "tts_${SessionData.entries[index].id}.wav")
+            withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToWav(ttsBytes, wavFile) }
+            Result.success(wavFile.absolutePath)
+        } catch (e: TtsException) {
+            Result.failure(e)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+
+        if (index >= SessionData.entries.size) return // entry may have been removed/cleared meanwhile
+
+        val final = result.fold(
+            onSuccess = { path ->
+                SessionData.entries[index].copy(
+                    audioFilePath   = path,
+                    isGeneratingTts = false,
+                    ttsError        = null
+                )
+            },
+            onFailure = { err ->
+                SessionData.entries[index].copy(
+                    audioFilePath   = null,
+                    isGeneratingTts = false,
+                    ttsError        = (err.message ?: "Unknown error").take(140)
+                )
+            }
+        )
+        SessionData.entries[index] = final
+        notifyItemChanged(index)
+        onEntryUpdated(index, final)
     }
 
     // ── Edit dialog ───────────────────────────────────────────────────────────
@@ -156,7 +248,8 @@ class BubbleAdapter(
             audioFilePath  = null,
             isEdited       = true,
             isTranslating  = true,
-            isGeneratingTts = false
+            isGeneratingTts = false,
+            ttsError        = null
         )
         SessionData.entries[index] = updated
         notifyItemChanged(index)
@@ -168,6 +261,8 @@ class BubbleAdapter(
                 withContext(Dispatchers.IO) { geminiClient.translateText(corrected, targetLang) }
             } catch (e: Exception) { "[Translation failed]" }
 
+            if (index >= SessionData.entries.size) return@launch
+
             val afterTranslate = SessionData.entries[index].copy(
                 translatedText  = translated,
                 isTranslating   = false,
@@ -177,21 +272,9 @@ class BubbleAdapter(
             notifyItemChanged(index)
             onEntryUpdated(index, afterTranslate)
 
-            // Phase 3: re-generate TTS
-            val audioPath = try {
-                val pcm = withContext(Dispatchers.IO) { geminiClient.generateTts(translated) }
-                val wavFile = File(context.filesDir, "tts_${SessionData.entries[index].id}.wav")
-                withContext(Dispatchers.IO) { WavWriter.write(pcm, wavFile) }
-                wavFile.absolutePath
-            } catch (e: Exception) { null }
-
-            val final = SessionData.entries[index].copy(
-                audioFilePath   = audioPath,
-                isGeneratingTts = false
-            )
-            SessionData.entries[index] = final
-            notifyItemChanged(index)
-            onEntryUpdated(index, final)
+            // Phase 3: re-generate TTS (shared helper — records ttsError on failure
+            // instead of silently leaving audioFilePath null with no explanation)
+            runTtsPhase(index, translated)
         }
     }
 

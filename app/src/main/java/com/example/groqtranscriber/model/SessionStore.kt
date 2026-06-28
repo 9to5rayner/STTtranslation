@@ -10,8 +10,8 @@ import java.io.File
  * Persists TranscriptEntry list to a JSON file in internal storage.
  * Called on session end (save) and app start (load).
  *
- * Transient flags (isTranscribing, isTranslating, isGeneratingTts)
- * are always reset to false on load — they only make sense at runtime.
+ * Transient flags (isTranscribing, isTranslating, isGeneratingTts, ttsError)
+ * are always reset on load — they only make sense at runtime.
  */
 object SessionStore {
 
@@ -33,7 +33,8 @@ object SessionStore {
             loaded.map { it.copy(
                 isTranscribing   = false,
                 isTranslating    = false,
-                isGeneratingTts  = false
+                isGeneratingTts  = false,
+                ttsError         = null
             )}.toMutableList()
         } catch (e: Exception) {
             e.printStackTrace()

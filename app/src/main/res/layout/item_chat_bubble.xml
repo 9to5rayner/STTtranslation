@@ -158,6 +158,19 @@
             android:padding="10dp"
             android:contentDescription="Play translation"
             android:visibility="gone"/>
+
+        <!-- ↻ Retry TTS button — shown only when ttsError != null -->
+        <ImageButton
+            android:id="@+id/btnRetryTts"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:src="@android:drawable/ic_popup_sync"
+            android:background="@drawable/bubble_navy"
+            android:tint="@color/gold_primary"
+            android:padding="10dp"
+            android:contentDescription="Retry audio generation"
+            android:visibility="gone"/>
     </LinearLayout>
 
     <!-- ── "Generating audio…" row ── -->
@@ -176,6 +189,27 @@
             android:text="🔊 Generating audio…"
             android:textSize="12sp"
             android:textColor="@color/text_secondary"
+            android:textStyle="italic"/>
+    </LinearLayout>
+
+    <!-- ── TTS error row — shown only when ttsError != null ── -->
+    <LinearLayout
+        android:id="@+id/llTtsError"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="28dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvTtsError"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="⚠️ Audio failed — tap ↻ to retry"
+            android:textSize="11sp"
+            android:textColor="@color/recording_red"
             android:textStyle="italic"/>
     </LinearLayout>
 
