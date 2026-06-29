@@ -8,6 +8,11 @@
     <color name="gold_light">#E8C96A</color>
     <color name="gold_pale">#F5E9C4</color>
 
+    <!-- Incoming-message accent (partner's bubbles) -->
+    <color name="teal_deep">#2E6B5E</color>
+    <color name="lavender_pale">#E6E0F5</color>
+    <color name="lavender_stroke">#A893C9</color>
+
     <!-- Neutrals -->
     <color name="cream_bg">#F8F5EE</color>
     <color name="cream_card">#FFFFFF</color>
