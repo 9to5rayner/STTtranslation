@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "99859064289",
+    "firebase_url": "https://kiyolatte-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "kiyolatte",
+    "storage_bucket": "kiyolatte.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:99859064289:android:14232c0fffc92b18afdea0",
+        "android_client_info": {
+          "package_name": "com.example.groqtranscriber"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDT5AmkvaKnITmUEaqckzonRxS0JkUagVU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
