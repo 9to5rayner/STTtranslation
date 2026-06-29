@@ -37,7 +37,7 @@ class LaunchActivity : AppCompatActivity() {
         val savedIndex = providerNames.indexOf(savedProvider).coerceAtLeast(0)
         spProvider.setSelection(savedIndex)
 
-        // ── Launch ─────────────────────────────────────────────────────────
+        // ── Launch → RoomActivity ──────────────────────────────────────────
         btnLaunch.setOnClickListener {
             val key = etApiKey.text.toString().trim()
             if (key.isEmpty()) {
@@ -61,10 +61,11 @@ class LaunchActivity : AppCompatActivity() {
                 .putString("api_provider", selectedProvider.displayName)
                 .apply()
 
+            // ── Route to RoomActivity (new) instead of RecordingActivity ───
             startActivity(
-                Intent(this, RecordingActivity::class.java).apply {
-                    putExtra("TARGET_LANG", selectedLang)
-                    putExtra("API_PROVIDER", selectedProvider.name) // pass enum name
+                Intent(this, RoomActivity::class.java).apply {
+                    putExtra("TARGET_LANG",   selectedLang)
+                    putExtra("API_PROVIDER",  selectedProvider.name)
                 }
             )
         }

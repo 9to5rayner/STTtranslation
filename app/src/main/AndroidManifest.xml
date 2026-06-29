@@ -7,7 +7,7 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="Groq Transcriber"
+        android:label="Meeting Scribe"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.GroqTranscriber">
@@ -21,8 +21,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Phase 1/2: Room creation and joining -->
+        <activity android:name=".ui.RoomActivity"    android:exported="false" />
+
         <activity android:name=".ui.RecordingActivity" android:exported="false" />
-        <activity android:name=".ui.ExportActivity" android:exported="false" />
+        <activity android:name=".ui.ExportActivity"    android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

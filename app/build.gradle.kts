@@ -2,6 +2,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.google.gms.google-services")  // Firebase — must be LAST
 }
 
 android {
@@ -43,4 +44,11 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // ── Firebase ──────────────────────────────────────────────────────────────
+    // BOM manages all Firebase library versions so they stay in sync.
+    // Only add libraries actually used — don't pull in the whole SDK.
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-database-ktx")   // Realtime Database
+    implementation("com.google.firebase:firebase-storage-ktx")    // Storage (TTS audio upload)
 }

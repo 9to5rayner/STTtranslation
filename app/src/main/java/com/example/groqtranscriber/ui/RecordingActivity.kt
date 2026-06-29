@@ -45,6 +45,10 @@ class RecordingActivity : AppCompatActivity() {
     private lateinit var provider:       ApiProvider
     private var mediaPlayer:             MediaPlayer? = null
 
+    // ── Room / identity (Phase 1/2) ───────────────────────────────────────────
+    private lateinit var roomCode:  String
+    private lateinit var deviceId:  String
+
     // ── State ─────────────────────────────────────────────────────────────────
     private var isRecording       = false
     private var recordingFile:      File? = null
@@ -88,10 +92,11 @@ class RecordingActivity : AppCompatActivity() {
         provider = try { ApiProvider.valueOf(providerName) }
                    catch (_: IllegalArgumentException) { ApiProvider.GOOGLE_GEMINI }
 
-        // ── Resolve TTS backend (native Gemini vs. kie.ai/ElevenLabs) ───────────
-        // kie.ai has no Gemini TTS model, so that provider's audio generation
-        // goes through KieAiTtsClient (ElevenLabs Turbo v2.5 via kie.ai's async
-        // Jobs API) instead — reusing the SAME api key, no separate key needed.
+        // ── Resolve room code and device identity (Phase 1/2) ─────────────────
+        roomCode = intent.getStringExtra("ROOM_CODE") ?: ""
+        deviceId = prefs.getString("device_id", "") ?: ""
+
+        // ── Resolve TTS backend ───────────────────────────────────────────────
         val kieAiTtsClient: KieAiTtsClient? =
             if (!provider.useNativeGeminiTts) KieAiTtsClient(apiKey) else null
 
@@ -207,7 +212,6 @@ class RecordingActivity : AppCompatActivity() {
 
             when {
                 remaining <= 0 -> {
-                    // Auto-stop at 60 s
                     stopRecording()
                     return
                 }
@@ -242,7 +246,6 @@ class RecordingActivity : AppCompatActivity() {
 
     private fun processRecording(file: File, startMs: Long, endMs: Long) {
         scope.launch {
-            // Add placeholder entry in TRANSCRIBING state
             val placeholder = TranscriptEntry(
                 timestampStart  = startMs,
                 timestampEnd    = endMs,
@@ -259,14 +262,12 @@ class RecordingActivity : AppCompatActivity() {
                 withContext(Dispatchers.IO) { audioChunker.safelyDeleteChunk(file) }
 
                 if (original.isBlank()) {
-                    // Silent clip — remove placeholder
                     SessionData.entries.removeAt(index)
                     adapter.notifyItemRemoved(index)
                     setIdleUi()
                     return@launch
                 }
 
-                // Show navy Indonesian bubble (translation pending)
                 SessionData.entries[index] = SessionData.entries[index].copy(
                     originalText   = original,
                     isTranscribing = false,
@@ -291,13 +292,6 @@ class RecordingActivity : AppCompatActivity() {
                 adapter.notifyItemChanged(index)
 
                 // ── Phase 3: TTS ──────────────────────────────────────────────
-                // Records the specific failure reason on ttsError (instead of
-                // silently leaving audioFilePath null) so the UI can show an
-                // error tag + retry button (see BubbleAdapter.retryTts).
-                // ttsFileExtension()/writeTtsBytesToFile() handle the format
-                // difference between native Gemini TTS (raw PCM → .wav) and
-                // kie.ai/ElevenLabs (complete mp3 file → .mp3) — callers don't
-                // need to know which path produced the bytes.
                 val ttsResult: Result<String> = try {
                     val ttsBytes = withContext(Dispatchers.IO) { geminiClient.generateTts(translated) }
                     val ext      = geminiClient.ttsFileExtension()
@@ -336,7 +330,6 @@ class RecordingActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 e.printStackTrace()
                 tvStatus.text = "⚠️ Error: ${e.message?.take(80)}"
-                // Remove failed placeholder
                 if (index < SessionData.entries.size) {
                     SessionData.entries.removeAt(index)
                     adapter.notifyItemRemoved(index)
@@ -367,7 +360,8 @@ class RecordingActivity : AppCompatActivity() {
     // ── UI states ─────────────────────────────────────────────────────────────
 
     private fun setIdleUi() {
-        tvStatus.text    = "Ready · ${provider.displayName}"
+        tvStatus.text    = if (roomCode.isNotEmpty()) "Room: $roomCode · ${provider.displayName}"
+                           else "Ready · ${provider.displayName}"
         tvTimer.text     = formatTime(0)
         btnRecord.text   = "⏺  Record"
         btnRecord.alpha  = 1f
