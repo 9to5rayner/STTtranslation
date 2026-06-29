@@ -1,5 +1,5 @@
-<!-- app/src/main/res/drawable/bubble_lavender.xml — incoming "translation" bubble -->
 <?xml version="1.0" encoding="utf-8"?>
+<!-- incoming "translation" bubble -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="#E6E0F5"/>

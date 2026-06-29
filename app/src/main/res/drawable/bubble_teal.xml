@@ -1,5 +1,5 @@
-<!-- app/src/main/res/drawable/bubble_teal.xml — incoming "original language" bubble -->
 <?xml version="1.0" encoding="utf-8"?>
+<!-- incoming "original language" bubble -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="#2E6B5E"/>
