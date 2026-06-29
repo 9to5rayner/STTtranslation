@@ -23,29 +23,27 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Renders each TranscriptEntry as a two-bubble chat item:
+ * Renders each TranscriptEntry as a chat bubble item.
  *
- *   🕐 0:12  ·  tap to edit          [EDITED]
- *   ┌─────────────────────────────────────────┐  ← navy bubble (Indonesian)
- *   │ 🇮🇩  Selamat pagi saudara-saudari…      │
- *   └─────────────────────────────────────────┘
- *   ┌─────────────────────────────────────────┐  ← gold bubble (translation)
- *   │ 🌐  Good morning brothers and sisters…  │  ▶
- *   └─────────────────────────────────────────┘
- *   ⚠️ Audio failed — tap ↻ to retry            ← only if TTS failed
+ * OUTGOING (isIncoming = false) — right-reading layout:
+ *   🕐 0:12  ·  tap to edit         [EDITED]  [✓ Sent / ⏳ Sending / ⚠️ Failed]
+ *   🇮🇩  navy bubble
+ *   🌐  gold bubble                                                    ▶  ↻(tts)
+ *   ⚠️ Translation failed — tap ↻ to retry      ← translationError row
+ *   ⚠️ Audio failed — tap ↻ to retry            ← ttsError row
  *
- * State indicators:
- *   • isTranscribing  → "Transcribing…" shimmer, no bubbles yet
- *   • isTranslating   → navy bubble visible, "Translating…" below
- *   • isGeneratingTts → gold bubble visible, "Generating audio…" below play button
- *   • audioFilePath set → ▶ Play button active
- *   • ttsError set      → ⚠️ error row + ↻ retry button, play button disabled
+ * INCOMING (isIncoming = true) — same layout, different label:
+ *   🕐 0:12  · from Partner
+ *   🇮🇩  navy bubble
+ *   🌐  gold bubble                                                    ▶  ↻(tts)
+ *   ⚠️ Audio failed — tap ↻ to retry
+ *   (no edit hint, no send status, no translation retry — we don't own these)
  *
- * TTS generation itself is provider-agnostic from this class's point of view —
- * geminiClient.generateTts() + geminiClient.ttsFileExtension() +
- * geminiClient.writeTtsBytesToFile() handle the difference between native
- * Gemini TTS (raw PCM → .wav) and kie.ai/ElevenLabs Turbo v2.5 (complete
- * mp3 file → .mp3) internally.
+ * Pipeline gates enforced here:
+ *   - retryTranslation: re-runs translation, then only proceeds to TTS if
+ *     the new translation is non-blank (same gate as the main pipeline).
+ *   - retryTts: only runs if translatedText is non-blank AND translationError
+ *     is null (same gate as Phase 3 in RecordingActivity).
  */
 class BubbleAdapter(
     private val context:        Context,
@@ -57,27 +55,29 @@ class BubbleAdapter(
 ) : RecyclerView.Adapter<BubbleAdapter.BubbleVH>() {
 
     inner class BubbleVH(view: View) : RecyclerView.ViewHolder(view) {
-        // Timestamp row
-        val tvTimestamp:    TextView     = view.findViewById(R.id.tvTimestamp)
-        val tvEditHint:     TextView     = view.findViewById(R.id.tvEditHint)
-        val tvEdited:       TextView     = view.findViewById(R.id.tvEdited)
+        val tvTimestamp:         TextView     = view.findViewById(R.id.tvTimestamp)
+        val tvEditHint:          TextView     = view.findViewById(R.id.tvEditHint)
+        val tvEdited:            TextView     = view.findViewById(R.id.tvEdited)
+        val tvSendStatus:        TextView     = view.findViewById(R.id.tvSendStatus)
 
-        // Indonesian bubble
-        val llNavyRow:      LinearLayout = view.findViewById(R.id.llNavyRow)
-        val tvOriginal:     TextView     = view.findViewById(R.id.tvOriginal)
+        val llNavyRow:           LinearLayout = view.findViewById(R.id.llNavyRow)
+        val tvOriginal:          TextView     = view.findViewById(R.id.tvOriginal)
 
-        // Translation bubble
-        val llGoldRow:      LinearLayout = view.findViewById(R.id.llGoldRow)
-        val tvTranslation:  TextView     = view.findViewById(R.id.tvTranslation)
-        val btnPlay:        ImageButton  = view.findViewById(R.id.btnPlay)
-        val btnRetryTts:    ImageButton  = view.findViewById(R.id.btnRetryTts)
+        val llGoldRow:           LinearLayout = view.findViewById(R.id.llGoldRow)
+        val tvTranslation:       TextView     = view.findViewById(R.id.tvTranslation)
+        val btnPlay:             ImageButton  = view.findViewById(R.id.btnPlay)
+        val btnRetryTts:         ImageButton  = view.findViewById(R.id.btnRetryTts)
 
-        // Status rows
-        val llTranscribing: LinearLayout = view.findViewById(R.id.llTranscribing)
-        val llTranslating:  LinearLayout = view.findViewById(R.id.llTranslating)
-        val llTtsLoading:   LinearLayout = view.findViewById(R.id.llTtsLoading)
-        val llTtsError:     LinearLayout = view.findViewById(R.id.llTtsError)
-        val tvTtsError:     TextView     = view.findViewById(R.id.tvTtsError)
+        val llTranscribing:      LinearLayout = view.findViewById(R.id.llTranscribing)
+        val llTranslating:       LinearLayout = view.findViewById(R.id.llTranslating)
+        val llTtsLoading:        LinearLayout = view.findViewById(R.id.llTtsLoading)
+        val llTtsError:          LinearLayout = view.findViewById(R.id.llTtsError)
+        val tvTtsError:          TextView     = view.findViewById(R.id.tvTtsError)
+
+        // New views for translation error + retry
+        val llTranslationError:  LinearLayout = view.findViewById(R.id.llTranslationError)
+        val tvTranslationError:  TextView     = view.findViewById(R.id.tvTranslationError)
+        val btnRetryTranslation: ImageButton  = view.findViewById(R.id.btnRetryTranslation)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
@@ -90,9 +90,25 @@ class BubbleAdapter(
 
     private fun bind(h: BubbleVH, e: TranscriptEntry, pos: Int) {
 
-        // ── Timestamp + tags ──────────────────────────────────────────────────
+        // ── Timestamp + ownership label ───────────────────────────────────────
         h.tvTimestamp.text = formatTs(e.timestampStart)
-        h.tvEdited.visibility = if (e.isEdited) View.VISIBLE else View.GONE
+        h.tvEdited.visibility    = if (!e.isIncoming && e.isEdited) View.VISIBLE else View.GONE
+        h.tvEditHint.visibility  = if (!e.isIncoming && e.originalText.isNotEmpty() &&
+                                       !e.isTranscribing && !e.isTranslating &&
+                                       !e.isGeneratingTts) View.VISIBLE else View.GONE
+
+        // ── Send status (outgoing only) ───────────────────────────────────────
+        h.tvSendStatus.visibility = if (!e.isIncoming && e.originalText.isNotEmpty()) {
+            View.VISIBLE
+        } else View.GONE
+
+        h.tvSendStatus.text = when {
+            e.isIncoming            -> ""
+            e.sendError != null     -> "⚠️ Not sent"
+            e.isSendingToFirebase   -> "⏳ Sending…"
+            e.isSentToFirebase      -> "✓ Sent"
+            else                    -> ""  // local-only (no room) or pre-send
+        }
 
         // ── Transcribing placeholder ──────────────────────────────────────────
         h.llTranscribing.visibility = if (e.isTranscribing) View.VISIBLE else View.GONE
@@ -104,6 +120,19 @@ class BubbleAdapter(
         // ── "Translating…" row ────────────────────────────────────────────────
         h.llTranslating.visibility = if (e.isTranslating) View.VISIBLE else View.GONE
 
+        // ── Translation error row (outgoing only) ─────────────────────────────
+        val hasTranslationError = !e.isIncoming && e.translationError != null
+        h.llTranslationError.visibility = if (hasTranslationError) View.VISIBLE else View.GONE
+        if (hasTranslationError) {
+            h.tvTranslationError.text = "⚠️ ${e.translationError}"
+        }
+        h.btnRetryTranslation.visibility = if (hasTranslationError) View.VISIBLE else View.GONE
+        h.btnRetryTranslation.setOnClickListener {
+            val p = h.adapterPosition
+            if (p == RecyclerView.NO_POSITION || p >= SessionData.entries.size) return@setOnClickListener
+            retryTranslation(p)
+        }
+
         // ── Translation bubble ────────────────────────────────────────────────
         val hasTranslation = e.translatedText.isNotEmpty()
         h.llGoldRow.visibility = if (hasTranslation) View.VISIBLE else View.GONE
@@ -112,12 +141,10 @@ class BubbleAdapter(
         // ── TTS loading row ───────────────────────────────────────────────────
         h.llTtsLoading.visibility = if (e.isGeneratingTts) View.VISIBLE else View.GONE
 
-        // ── TTS error row + retry button ──────────────────────────────────────
+        // ── TTS error row ─────────────────────────────────────────────────────
         val hasTtsError = e.ttsError != null && !e.isGeneratingTts
-        h.llTtsError.visibility = if (hasTtsError) View.VISIBLE else View.GONE
-        if (hasTtsError) {
-            h.tvTtsError.text = "⚠️ Audio failed: ${e.ttsError}"
-        }
+        h.llTtsError.visibility  = if (hasTtsError) View.VISIBLE else View.GONE
+        if (hasTtsError) h.tvTtsError.text = "⚠️ Audio failed: ${e.ttsError}"
         h.btnRetryTts.visibility = if (hasTtsError) View.VISIBLE else View.GONE
         h.btnRetryTts.setOnClickListener {
             val p = h.adapterPosition
@@ -126,65 +153,128 @@ class BubbleAdapter(
         }
 
         // ── Play button ───────────────────────────────────────────────────────
-        h.btnPlay.visibility  = if (hasTranslation && !e.isGeneratingTts) View.VISIBLE else View.GONE
-        h.btnPlay.isEnabled   = e.audioFilePath != null
-        h.btnPlay.alpha       = if (e.audioFilePath != null) 1f else 0.35f
+        h.btnPlay.visibility = if (hasTranslation && !e.isGeneratingTts) View.VISIBLE else View.GONE
+        h.btnPlay.isEnabled  = e.audioFilePath != null
+        h.btnPlay.alpha      = if (e.audioFilePath != null) 1f else 0.35f
         h.btnPlay.setOnClickListener {
             e.audioFilePath?.let { onPlayRequest(it) }
                 ?: Toast.makeText(context, "Audio not ready yet.", Toast.LENGTH_SHORT).show()
         }
 
-        // ── Tap bubble to edit ────────────────────────────────────────────────
-        h.tvEditHint.visibility = if (e.originalText.isNotEmpty()) View.VISIBLE else View.GONE
+        // ── Tap to edit (outgoing only) ───────────────────────────────────────
         h.itemView.setOnClickListener {
+            if (e.isIncoming) return@setOnClickListener
             val p = h.adapterPosition
             if (p == RecyclerView.NO_POSITION || p >= SessionData.entries.size) return@setOnClickListener
             val entry = SessionData.entries[p]
             if (entry.isTranscribing || entry.isTranslating || entry.isGeneratingTts) return@setOnClickListener
-            showEditDialog(h, entry, p)
+            showEditDialog(entry, p)
+        }
+    }
+
+    // ── Translation retry ─────────────────────────────────────────────────────
+
+    /**
+     * Re-runs the translation phase for the entry at [index].
+     * Gate: originalText must be non-blank (should always be true at this point).
+     * On success, clears translationError and proceeds to TTS.
+     * On failure, updates translationError and stops.
+     */
+    fun retryTranslation(index: Int) {
+        if (index < 0 || index >= SessionData.entries.size) return
+        val entry = SessionData.entries[index]
+        if (entry.originalText.isBlank() || entry.isTranslating) return
+
+        val withRetrying = entry.copy(
+            isTranslating    = true,
+            translationError = null,
+            translatedText   = "",
+            audioFilePath    = null,
+            ttsError         = null,
+            isGeneratingTts  = false
+        )
+        SessionData.entries[index] = withRetrying
+        notifyItemChanged(index)
+        onEntryUpdated(index, withRetrying)
+
+        scope.launch {
+            val translated: String? = try {
+                withContext(Dispatchers.IO) {
+                    geminiClient.translateText(entry.originalText, targetLang)
+                }.takeIf { it.isNotBlank() }
+            } catch (e: Exception) {
+                null
+            }
+
+            if (index >= SessionData.entries.size) return@launch
+
+            if (translated.isNullOrBlank()) {
+                // Translation still failing — record error, stop
+                val failed = SessionData.entries[index].copy(
+                    isTranslating    = false,
+                    translationError = "Translation failed. Tap ↻ to retry again."
+                )
+                SessionData.entries[index] = failed
+                notifyItemChanged(index)
+                onEntryUpdated(index, failed)
+                return@launch
+            }
+
+            // Translation succeeded — proceed to TTS
+            val afterTranslate = SessionData.entries[index].copy(
+                translatedText   = translated,
+                isTranslating    = false,
+                translationError = null,
+                isGeneratingTts  = true
+            )
+            SessionData.entries[index] = afterTranslate
+            notifyItemChanged(index)
+            onEntryUpdated(index, afterTranslate)
+
+            runTtsPhase(index)
         }
     }
 
     // ── TTS retry ─────────────────────────────────────────────────────────────
 
     /**
-     * Re-runs only the TTS phase for the entry at [index], using its current
-     * translatedText. Clears any previous error and shows the loading row
-     * while it runs. Safe to call from the bubble's own retry button.
+     * Re-runs the TTS phase for the entry at [index].
+     * Gate: translatedText must be non-blank AND translationError must be null.
      */
     fun retryTts(index: Int) {
         if (index < 0 || index >= SessionData.entries.size) return
         val entry = SessionData.entries[index]
-        if (entry.translatedText.isEmpty() || entry.isGeneratingTts) return
+
+        // Gate check
+        if (entry.translatedText.isBlank() || entry.translationError != null || entry.isGeneratingTts) return
 
         val withLoading = entry.copy(isGeneratingTts = true, ttsError = null)
         SessionData.entries[index] = withLoading
         notifyItemChanged(index)
         onEntryUpdated(index, withLoading)
 
-        scope.launch {
-            runTtsPhase(index, entry.translatedText)
-        }
+        scope.launch { runTtsPhase(index) }
     }
 
-    /**
-     * Runs TTS generation for [translatedText] and writes the result (success
-     * or failure) back into SessionData.entries[index]. Shared by the initial
-     * pipeline-completion path (applyEdit) and the manual retry path so both
-     * report errors the same way instead of one of them swallowing to null.
-     *
-     * geminiClient.generateTts() + ttsFileExtension()/writeTtsBytesToFile()
-     * handle the byte-format difference between native Gemini TTS and
-     * kie.ai/ElevenLabs internally — this function doesn't need to know
-     * which provider is active.
-     */
-    private suspend fun runTtsPhase(index: Int, translatedText: String) {
+    // ── Shared TTS phase ──────────────────────────────────────────────────────
+
+    private suspend fun runTtsPhase(index: Int) {
         if (index >= SessionData.entries.size) return
+        val entry = SessionData.entries[index]
+
+        // Gate: don't attempt TTS if translation didn't succeed
+        if (entry.translatedText.isBlank() || entry.translationError != null) {
+            if (index < SessionData.entries.size) {
+                SessionData.entries[index] = entry.copy(isGeneratingTts = false)
+                notifyItemChanged(index)
+            }
+            return
+        }
 
         val result: Result<String> = try {
-            val ttsBytes  = withContext(Dispatchers.IO) { geminiClient.generateTts(translatedText) }
+            val ttsBytes  = withContext(Dispatchers.IO) { geminiClient.generateTts(entry.translatedText) }
             val ext       = geminiClient.ttsFileExtension()
-            val audioFile = File(context.filesDir, "tts_${SessionData.entries[index].id}.$ext")
+            val audioFile = File(context.filesDir, "tts_${entry.id}.$ext")
             withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToFile(ttsBytes, audioFile) }
             Result.success(audioFile.absolutePath)
         } catch (e: TtsException) {
@@ -193,7 +283,7 @@ class BubbleAdapter(
             Result.failure(e)
         }
 
-        if (index >= SessionData.entries.size) return // entry may have been removed/cleared meanwhile
+        if (index >= SessionData.entries.size) return
 
         val final = result.fold(
             onSuccess = { path ->
@@ -216,9 +306,9 @@ class BubbleAdapter(
         onEntryUpdated(index, final)
     }
 
-    // ── Edit dialog ───────────────────────────────────────────────────────────
+    // ── Edit dialog (outgoing only) ───────────────────────────────────────────
 
-    private fun showEditDialog(h: BubbleVH, entry: TranscriptEntry, index: Int) {
+    private fun showEditDialog(entry: TranscriptEntry, index: Int) {
         val editText = EditText(context).apply {
             setText(entry.originalText)
             setSelection(entry.originalText.length)
@@ -235,56 +325,69 @@ class BubbleAdapter(
                     Toast.makeText(context, "Cannot be empty.", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                // Only kick off re-translate if the text actually changed
                 if (corrected == entry.originalText) return@setPositiveButton
-                applyEdit(h, index, corrected)
+                applyEdit(index, corrected)
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun applyEdit(h: BubbleVH, index: Int, corrected: String) {
-        // Update model → mark as edited + isTranslating
+    private fun applyEdit(index: Int, corrected: String) {
         val updated = SessionData.entries[index].copy(
-            originalText   = corrected,
-            translatedText = "",
-            audioFilePath  = null,
-            isEdited       = true,
-            isTranslating  = true,
-            isGeneratingTts = false,
-            ttsError        = null
+            originalText     = corrected,
+            translatedText   = "",
+            audioFilePath    = null,
+            isEdited         = true,
+            isTranslating    = true,
+            translationError = null,
+            isGeneratingTts  = false,
+            ttsError         = null
         )
         SessionData.entries[index] = updated
         notifyItemChanged(index)
         onEntryUpdated(index, updated)
 
         scope.launch {
-            // Phase 2: re-translate
-            val translated = try {
-                withContext(Dispatchers.IO) { geminiClient.translateText(corrected, targetLang) }
-            } catch (e: Exception) { "[Translation failed]" }
+            val translated: String? = try {
+                withContext(Dispatchers.IO) {
+                    geminiClient.translateText(corrected, targetLang)
+                }.takeIf { it.isNotBlank() }
+            } catch (e: Exception) { null }
 
             if (index >= SessionData.entries.size) return@launch
 
+            if (translated.isNullOrBlank()) {
+                val failed = SessionData.entries[index].copy(
+                    isTranslating    = false,
+                    translationError = "Translation failed. Tap ↻ to retry."
+                )
+                SessionData.entries[index] = failed
+                notifyItemChanged(index)
+                onEntryUpdated(index, failed)
+                return@launch
+            }
+
             val afterTranslate = SessionData.entries[index].copy(
-                translatedText  = translated,
-                isTranslating   = false,
-                isGeneratingTts = true
+                translatedText   = translated,
+                isTranslating    = false,
+                translationError = null,
+                isGeneratingTts  = true
             )
             SessionData.entries[index] = afterTranslate
             notifyItemChanged(index)
             onEntryUpdated(index, afterTranslate)
 
-            // Phase 3: re-generate TTS (shared helper — records ttsError on failure
-            // instead of silently leaving audioFilePath null with no explanation)
-            runTtsPhase(index, translated)
+            runTtsPhase(index)
         }
     }
 
-    // ── Formatting ─────────────────────────────────────────────────────────────
+    // ── Formatting ────────────────────────────────────────────────────────────
 
     private fun formatTs(wallMs: Long): String {
-        val h = java.util.Calendar.getInstance().apply { timeInMillis = wallMs }
-        return "🕐 %02d:%02d".format(h.get(java.util.Calendar.HOUR_OF_DAY), h.get(java.util.Calendar.MINUTE))
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = wallMs }
+        return "🕐 %02d:%02d".format(
+            cal.get(java.util.Calendar.HOUR_OF_DAY),
+            cal.get(java.util.Calendar.MINUTE)
+        )
     }
 }

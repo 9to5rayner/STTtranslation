@@ -10,8 +10,7 @@ import java.io.File
  * Persists TranscriptEntry list to a JSON file in internal storage.
  * Called on session end (save) and app start (load).
  *
- * Transient flags (isTranscribing, isTranslating, isGeneratingTts, ttsError)
- * are always reset on load — they only make sense at runtime.
+ * All transient flags are always reset on load — they only make sense at runtime.
  */
 object SessionStore {
 
@@ -29,13 +28,20 @@ object SessionStore {
         return try {
             val type = object : TypeToken<List<TranscriptEntry>>() {}.type
             val loaded: List<TranscriptEntry> = gson.fromJson(file.readText(), type)
-            // Reset all transient flags
-            loaded.map { it.copy(
-                isTranscribing   = false,
-                isTranslating    = false,
-                isGeneratingTts  = false,
-                ttsError         = null
-            )}.toMutableList()
+            // Reset ALL transient flags — they have no meaning across sessions
+            loaded.map {
+                it.copy(
+                    isIncoming          = false,
+                    isTranscribing      = false,
+                    isTranslating       = false,
+                    isGeneratingTts     = false,
+                    translationError    = null,
+                    ttsError            = null,
+                    isSendingToFirebase = false,
+                    // isSentToFirebase is kept — it's a historical fact, not a live state
+                    sendError           = null
+                )
+            }.toMutableList()
         } catch (e: Exception) {
             e.printStackTrace()
             mutableListOf()

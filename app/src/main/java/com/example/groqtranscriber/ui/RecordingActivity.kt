@@ -9,7 +9,6 @@ import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.View
 import android.view.animation.LinearInterpolator
 import android.widget.Button
 import android.widget.TextView
@@ -25,15 +24,19 @@ import com.example.groqtranscriber.api.KieAiTtsClient
 import com.example.groqtranscriber.api.TtsException
 import com.example.groqtranscriber.audio.AudioChunker
 import com.example.groqtranscriber.audio.AudioRecorder
+import com.example.groqtranscriber.model.ChatMessage
+import com.example.groqtranscriber.model.FirebaseRepository
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.SessionStore
 import com.example.groqtranscriber.model.TranscriptEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 
 class RecordingActivity : AppCompatActivity() {
 
@@ -45,28 +48,30 @@ class RecordingActivity : AppCompatActivity() {
     private lateinit var provider:       ApiProvider
     private var mediaPlayer:             MediaPlayer? = null
 
-    // ── Room / identity (Phase 1/2) ───────────────────────────────────────────
-    private lateinit var roomCode:  String
-    private lateinit var deviceId:  String
+    // ── Room / identity ───────────────────────────────────────────────────────
+    private lateinit var roomCode:   String
+    private lateinit var deviceId:   String
+    private lateinit var nickname:   String
+    private var firebaseRepo:        FirebaseRepository? = null
 
     // ── State ─────────────────────────────────────────────────────────────────
-    private var isRecording       = false
-    private var recordingFile:      File? = null
-    private var elapsedSeconds    = 0
-    private val handler           = Handler(Looper.getMainLooper())
-    private var blinkAnimator:      ObjectAnimator? = null
+    private var isRecording    = false
+    private var recordingFile: File? = null
+    private var elapsedSeconds = 0
+    private val handler        = Handler(Looper.getMainLooper())
+    private var blinkAnimator: ObjectAnimator? = null
 
     // ── Coroutines ────────────────────────────────────────────────────────────
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     // ── Views ─────────────────────────────────────────────────────────────────
-    private lateinit var tvStatus:    TextView
-    private lateinit var tvTimer:     TextView
-    private lateinit var btnRecord:   Button
-    private lateinit var btnExport:   Button
-    private lateinit var btnClear:    Button
-    private lateinit var rvFeed:      RecyclerView
-    private lateinit var adapter:     BubbleAdapter
+    private lateinit var tvStatus:  TextView
+    private lateinit var tvTimer:   TextView
+    private lateinit var btnRecord: Button
+    private lateinit var btnExport: Button
+    private lateinit var btnClear:  Button
+    private lateinit var rvFeed:    RecyclerView
+    private lateinit var adapter:   BubbleAdapter
 
     // ─────────────────────────────────────────────────────────────────────────
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,18 +97,25 @@ class RecordingActivity : AppCompatActivity() {
         provider = try { ApiProvider.valueOf(providerName) }
                    catch (_: IllegalArgumentException) { ApiProvider.GOOGLE_GEMINI }
 
-        // ── Resolve room code and device identity (Phase 1/2) ─────────────────
+        // ── Room / identity ───────────────────────────────────────────────────
         roomCode = intent.getStringExtra("ROOM_CODE") ?: ""
         deviceId = prefs.getString("device_id", "") ?: ""
+        nickname = prefs.getString("user_nickname", "") ?: ""
 
-        // ── Resolve TTS backend ───────────────────────────────────────────────
+        // ── TTS backend ───────────────────────────────────────────────────────
         val kieAiTtsClient: KieAiTtsClient? =
             if (!provider.useNativeGeminiTts) KieAiTtsClient(apiKey) else null
 
-        targetLang   = intent.getStringExtra("TARGET_LANG") ?: "English"
-        geminiClient = GeminiClient(apiKey, provider, kieAiTtsClient)
+        targetLang    = intent.getStringExtra("TARGET_LANG") ?: "English"
+        geminiClient  = GeminiClient(apiKey, provider, kieAiTtsClient)
         audioRecorder = AudioRecorder(this)
         audioChunker  = AudioChunker(this)
+
+        // ── Firebase ──────────────────────────────────────────────────────────
+        if (roomCode.isNotEmpty() && deviceId.isNotEmpty()) {
+            firebaseRepo = FirebaseRepository(roomCode, deviceId)
+            attachFirebaseListener()
+        }
 
         // ── Load persisted history ────────────────────────────────────────────
         SessionData.entries.clear()
@@ -111,14 +123,16 @@ class RecordingActivity : AppCompatActivity() {
 
         // ── RecyclerView ──────────────────────────────────────────────────────
         adapter = BubbleAdapter(
-            context       = this,
-            geminiClient  = geminiClient,
-            targetLang    = targetLang,
-            scope         = scope,
-            onPlayRequest = { filePath -> playAudio(filePath) },
+            context        = this,
+            geminiClient   = geminiClient,
+            targetLang     = targetLang,
+            scope          = scope,
+            onPlayRequest  = { filePath -> playAudio(filePath) },
             onEntryUpdated = { index, entry ->
-                SessionData.entries[index] = entry
-                SessionStore.save(this, SessionData.entries)
+                if (index < SessionData.entries.size) {
+                    SessionData.entries[index] = entry
+                    SessionStore.save(this, SessionData.entries)
+                }
             }
         )
         rvFeed.apply {
@@ -135,14 +149,12 @@ class RecordingActivity : AppCompatActivity() {
         btnRecord.setOnClickListener {
             if (isRecording) stopRecording() else requestPermissionAndRecord()
         }
-
         btnExport.setOnClickListener {
             startActivity(Intent(this, ExportActivity::class.java).apply {
                 putExtra("TARGET_LANG",  targetLang)
                 putExtra("API_PROVIDER", provider.name)
             })
         }
-
         btnClear.setOnClickListener {
             SessionData.clear()
             SessionStore.clear(this)
@@ -151,6 +163,64 @@ class RecordingActivity : AppCompatActivity() {
         }
 
         setIdleUi()
+    }
+
+    // ── Firebase listener ─────────────────────────────────────────────────────
+
+    /**
+     * Attaches the Firebase ChildEventListener. When an incoming ChatMessage
+     * arrives, it is converted to a TranscriptEntry (marked isIncoming = true
+     * via a flag we store in the entry's id prefix) and the TTS phase is
+     * kicked off locally using the receiver's own API key.
+     *
+     * We reuse TranscriptEntry for display so BubbleAdapter needs zero changes
+     * to its data model. The isIncoming distinction is encoded as a negative id
+     * value — negative ids are incoming, positive ids are local.
+     * (The actual incoming ChatMessage id is stored separately in the entry's
+     * originalText metadata — see incomingEntryTag below.)
+     *
+     * Simpler encoding: we use a dedicated companion field on TranscriptEntry.
+     * Since TranscriptEntry doesn't yet have isIncoming, we use a naming
+     * convention: entries whose originalText starts with INCOMING_TAG are
+     * incoming. BubbleAdapter reads this tag to flip bubble layout.
+     *
+     * Actually — cleanest approach: add isIncoming directly to TranscriptEntry.
+     * That's the right call. TranscriptEntry already has it in the model above.
+     */
+    private fun attachFirebaseListener() {
+        firebaseRepo?.listenForMessages { chatMessage ->
+            // Called on main thread for each new incoming message
+            receiveIncomingMessage(chatMessage)
+        }
+    }
+
+    /**
+     * Handles a [ChatMessage] received from the remote partner.
+     * Adds it to the feed as an entry in "TTS generating" state, then
+     * kicks off local TTS generation.
+     */
+    private fun receiveIncomingMessage(msg: ChatMessage) {
+        val entry = TranscriptEntry(
+            id             = System.currentTimeMillis(),
+            timestampStart = msg.timestampMs,
+            timestampEnd   = msg.timestampMs,
+            originalText   = msg.originalText,
+            translatedText = msg.translatedText,
+            isIncoming     = true,
+            isGeneratingTts = msg.translatedText.isNotEmpty()
+        )
+        SessionData.entries.add(entry)
+        val index = SessionData.entries.size - 1
+        adapter.notifyItemInserted(index)
+        rvFeed.smoothScrollToPosition(index)
+        SessionStore.save(this, SessionData.entries)
+
+        // Generate TTS locally for the incoming translation
+        if (msg.translatedText.isNotEmpty()) {
+            scope.launch {
+                runTtsPhase(index)
+            }
+        }
     }
 
     // ── Recording lifecycle ───────────────────────────────────────────────────
@@ -182,7 +252,6 @@ class RecordingActivity : AppCompatActivity() {
         isRecording    = true
         elapsedSeconds = 0
         recordingFile  = audioChunker.createChunkFile(0)
-
         audioRecorder.startRecording(recordingFile!!)
         setRecordingUi()
         startTimer()
@@ -194,7 +263,6 @@ class RecordingActivity : AppCompatActivity() {
         handler.removeCallbacksAndMessages(null)
         blinkAnimator?.cancel()
         audioRecorder.stopRecording()
-
         setProcessingUi()
 
         val file = recordingFile ?: return
@@ -209,12 +277,8 @@ class RecordingActivity : AppCompatActivity() {
             elapsedSeconds++
             val remaining = MAX_SECONDS - elapsedSeconds
             tvTimer.text = formatTime(elapsedSeconds)
-
             when {
-                remaining <= 0 -> {
-                    stopRecording()
-                    return
-                }
+                remaining <= 0 -> { stopRecording(); return }
                 remaining <= WARNING_SECONDS -> startBlinking()
             }
             handler.postDelayed(this, 1_000)
@@ -229,10 +293,10 @@ class RecordingActivity : AppCompatActivity() {
     private fun startBlinking() {
         if (blinkAnimator?.isRunning == true) return
         blinkAnimator = ObjectAnimator.ofFloat(btnRecord, "alpha", 1f, 0.2f).apply {
-            duration       = 500
-            repeatCount    = ObjectAnimator.INFINITE
-            repeatMode     = ObjectAnimator.REVERSE
-            interpolator   = LinearInterpolator()
+            duration     = 500
+            repeatCount  = ObjectAnimator.INFINITE
+            repeatMode   = ObjectAnimator.REVERSE
+            interpolator = LinearInterpolator()
             start()
         }
     }
@@ -242,102 +306,263 @@ class RecordingActivity : AppCompatActivity() {
         return "%d:%02d".format(remaining / 60, remaining % 60)
     }
 
-    // ── Three-phase pipeline ──────────────────────────────────────────────────
+    // ── Pipeline ──────────────────────────────────────────────────────────────
+    //
+    // Each phase has:
+    //   • A gate check at entry (validates previous phase output).
+    //   • Up to MAX_RETRIES attempts with RETRY_DELAY_MS backoff between them.
+    //   • On all retries exhausted: sets the appropriate error field on the
+    //     entry, notifies the adapter, and STOPS — does not cascade into the
+    //     next phase with bad data.
+    //
+    // Phase 1 → Transcription   (gate: audio file must exist and be non-empty)
+    // Phase 2 → Translation     (gate: originalText must be non-blank)
+    // Phase 3 → TTS             (gate: translatedText must be non-blank AND
+    //                                  translationError must be null)
+    // Phase 4 → Firebase send   (gate: translatedText non-blank, no errors)
 
     private fun processRecording(file: File, startMs: Long, endMs: Long) {
         scope.launch {
+
+            // ── Insert placeholder ────────────────────────────────────────────
             val placeholder = TranscriptEntry(
-                timestampStart  = startMs,
-                timestampEnd    = endMs,
-                isTranscribing  = true
+                timestampStart = startMs,
+                timestampEnd   = endMs,
+                isTranscribing = true
             )
             SessionData.entries.add(placeholder)
             val index = SessionData.entries.size - 1
             adapter.notifyItemInserted(index)
             rvFeed.smoothScrollToPosition(index)
 
-            // ── Phase 1: Transcription ────────────────────────────────────────
-            try {
-                val original = withContext(Dispatchers.IO) { geminiClient.transcribeAudio(file) }
-                withContext(Dispatchers.IO) { audioChunker.safelyDeleteChunk(file) }
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE 1 — TRANSCRIPTION  (with retry)
+            // ═══════════════════════════════════════════════════════════════════
+            val original: String? = runWithRetry(
+                tag        = "Transcription",
+                maxRetries = MAX_RETRIES
+            ) {
+                withContext(Dispatchers.IO) { geminiClient.transcribeAudio(file) }
+            }
 
-                if (original.isBlank()) {
+            // Always clean up the audio file, regardless of success/failure
+            withContext(Dispatchers.IO) { audioChunker.safelyDeleteChunk(file) }
+
+            // Gate: transcription must return non-blank text
+            if (original.isNullOrBlank()) {
+                // Silent clip or total failure — remove placeholder silently
+                if (index < SessionData.entries.size) {
                     SessionData.entries.removeAt(index)
                     adapter.notifyItemRemoved(index)
-                    setIdleUi()
-                    return@launch
                 }
-
-                SessionData.entries[index] = SessionData.entries[index].copy(
-                    originalText   = original,
-                    isTranscribing = false,
-                    isTranslating  = true
-                )
-                adapter.notifyItemChanged(index)
                 setIdleUi()
+                return@launch
+            }
 
-                // ── Phase 2: Translation ──────────────────────────────────────
-                val translated = try {
-                    withContext(Dispatchers.IO) { geminiClient.translateText(original, targetLang) }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    "[Translation failed: ${e.message}]"
-                }
+            // Phase 1 succeeded — show Indonesian bubble, mark translating
+            if (index >= SessionData.entries.size) return@launch
+            SessionData.entries[index] = SessionData.entries[index].copy(
+                originalText   = original,
+                isTranscribing = false,
+                isTranslating  = true
+            )
+            adapter.notifyItemChanged(index)
+            setIdleUi()
 
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE 2 — TRANSLATION  (with retry)
+            // ═══════════════════════════════════════════════════════════════════
+            val translated: String? = runWithRetry(
+                tag        = "Translation",
+                maxRetries = MAX_RETRIES
+            ) {
+                withContext(Dispatchers.IO) { geminiClient.translateText(original, targetLang) }
+            }
+
+            if (index >= SessionData.entries.size) return@launch
+
+            // Gate: if translation failed after all retries, stop the pipeline
+            if (translated.isNullOrBlank()) {
                 SessionData.entries[index] = SessionData.entries[index].copy(
-                    translatedText = translated,
-                    isTranslating  = false,
-                    isGeneratingTts = true
+                    isTranslating    = false,
+                    translationError = "Translation failed after $MAX_RETRIES attempts. Tap ↻ to retry."
                 )
                 adapter.notifyItemChanged(index)
+                SessionStore.save(this@RecordingActivity, SessionData.entries)
+                return@launch  // ← pipeline stops here; TTS and Firebase are skipped
+            }
 
-                // ── Phase 3: TTS ──────────────────────────────────────────────
-                val ttsResult: Result<String> = try {
-                    val ttsBytes = withContext(Dispatchers.IO) { geminiClient.generateTts(translated) }
-                    val ext      = geminiClient.ttsFileExtension()
-                    val audioFile = File(filesDir, "tts_${SessionData.entries[index].id}.$ext")
-                    withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToFile(ttsBytes, audioFile) }
-                    Result.success(audioFile.absolutePath)
-                } catch (e: TtsException) {
-                    e.printStackTrace()
-                    Result.failure(e)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    Result.failure(e)
-                }
+            // Phase 2 succeeded — show gold bubble, mark TTS generating
+            SessionData.entries[index] = SessionData.entries[index].copy(
+                translatedText   = translated,
+                isTranslating    = false,
+                translationError = null,
+                isGeneratingTts  = true
+            )
+            adapter.notifyItemChanged(index)
 
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE 3 — TTS
+            // ═══════════════════════════════════════════════════════════════════
+            // Runs the shared TTS helper. Errors are recorded on ttsError;
+            // the pipeline continues to Phase 4 regardless (Firebase send
+            // does not depend on TTS succeeding).
+            runTtsPhase(index)
+
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE 4 — FIREBASE SEND
+            // ═══════════════════════════════════════════════════════════════════
+            if (index >= SessionData.entries.size) return@launch
+            val finalEntry = SessionData.entries[index]
+
+            // Gate: only send if we have valid text content
+            if (finalEntry.originalText.isBlank() || finalEntry.translatedText.isBlank()) {
+                return@launch
+            }
+
+            sendToFirebase(index, finalEntry, startMs)
+        }
+    }
+
+    // ── Shared TTS phase ──────────────────────────────────────────────────────
+
+    /**
+     * Runs TTS generation for the entry at [index] using its current
+     * translatedText. Updates the entry in place with either a file path
+     * (success) or a ttsError string (failure). Called from both the outgoing
+     * pipeline and the incoming message handler.
+     */
+    private suspend fun runTtsPhase(index: Int) {
+        if (index >= SessionData.entries.size) return
+        val entry = SessionData.entries[index]
+
+        // Gate: don't attempt TTS if there's no translated text or a translation error
+        if (entry.translatedText.isBlank() || entry.translationError != null) {
+            if (index < SessionData.entries.size) {
+                SessionData.entries[index] = entry.copy(isGeneratingTts = false)
+                adapter.notifyItemChanged(index)
+            }
+            return
+        }
+
+        val result: Result<String> = try {
+            val ttsBytes  = withContext(Dispatchers.IO) { geminiClient.generateTts(entry.translatedText) }
+            val ext       = geminiClient.ttsFileExtension()
+            val audioFile = File(filesDir, "tts_${entry.id}.$ext")
+            withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToFile(ttsBytes, audioFile) }
+            Result.success(audioFile.absolutePath)
+        } catch (e: TtsException) {
+            Result.failure(e)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+
+        if (index >= SessionData.entries.size) return
+
+        SessionData.entries[index] = result.fold(
+            onSuccess = { path ->
+                SessionData.entries[index].copy(
+                    audioFilePath   = path,
+                    isGeneratingTts = false,
+                    ttsError        = null
+                )
+            },
+            onFailure = { err ->
+                SessionData.entries[index].copy(
+                    audioFilePath   = null,
+                    isGeneratingTts = false,
+                    ttsError        = (err.message ?: "Unknown TTS error").take(140)
+                )
+            }
+        )
+        adapter.notifyItemChanged(index)
+        SessionStore.save(this, SessionData.entries)
+    }
+
+    // ── Firebase send ─────────────────────────────────────────────────────────
+
+    private fun sendToFirebase(index: Int, entry: TranscriptEntry, timestampMs: Long) {
+        val repo = firebaseRepo ?: return
+
+        // Mark as pending in UI
+        if (index < SessionData.entries.size) {
+            SessionData.entries[index] = entry.copy(isSendingToFirebase = true)
+            adapter.notifyItemChanged(index)
+        }
+
+        val message = ChatMessage(
+            id             = UUID.randomUUID().toString(),
+            senderId       = deviceId,
+            senderNickname = nickname,
+            timestampMs    = timestampMs,
+            originalText   = entry.originalText,
+            translatedText = entry.translatedText,
+            targetLang     = targetLang
+        )
+
+        repo.sendMessage(
+            message   = message,
+            onSuccess = {
                 if (index < SessionData.entries.size) {
-                    SessionData.entries[index] = ttsResult.fold(
-                        onSuccess = { path ->
-                            SessionData.entries[index].copy(
-                                audioFilePath   = path,
-                                isGeneratingTts = false,
-                                ttsError        = null
-                            )
-                        },
-                        onFailure = { err ->
-                            SessionData.entries[index].copy(
-                                audioFilePath   = null,
-                                isGeneratingTts = false,
-                                ttsError        = (err.message ?: "Unknown error").take(140)
-                            )
-                        }
+                    SessionData.entries[index] = SessionData.entries[index].copy(
+                        isSendingToFirebase = false,
+                        isSentToFirebase    = true
                     )
                     adapter.notifyItemChanged(index)
-                    SessionStore.save(this@RecordingActivity, SessionData.entries)
+                    SessionStore.save(this, SessionData.entries)
                 }
-
-            } catch (e: Exception) {
-                e.printStackTrace()
-                tvStatus.text = "⚠️ Error: ${e.message?.take(80)}"
+            },
+            onFailure = { errorMsg ->
                 if (index < SessionData.entries.size) {
-                    SessionData.entries.removeAt(index)
-                    adapter.notifyItemRemoved(index)
+                    SessionData.entries[index] = SessionData.entries[index].copy(
+                        isSendingToFirebase = false,
+                        isSentToFirebase    = false,
+                        sendError           = errorMsg.take(120)
+                    )
+                    adapter.notifyItemChanged(index)
                 }
-                withContext(Dispatchers.IO) { audioChunker.safelyDeleteChunk(file) }
-                setIdleUi()
+                Toast.makeText(
+                    this,
+                    "Failed to send message: $errorMsg",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
+
+    // ── Retry helper ──────────────────────────────────────────────────────────
+
+    /**
+     * Runs [block] up to [maxRetries] + 1 times (1 initial attempt + retries).
+     * Returns the result on success, or null if all attempts fail.
+     * Waits [RETRY_DELAY_MS] between attempts (doubles each time).
+     */
+    private suspend fun <T> runWithRetry(
+        tag: String,
+        maxRetries: Int,
+        block: suspend () -> T
+    ): T? {
+        var lastError: Exception? = null
+        var delayMs = RETRY_DELAY_MS
+
+        repeat(maxRetries + 1) { attempt ->
+            try {
+                val result = block()
+                // Validate that string results are non-blank
+                if (result is String && result.isBlank()) {
+                    throw Exception("$tag returned blank result")
+                }
+                return result
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt < maxRetries) {
+                    delay(delayMs)
+                    delayMs *= 2  // exponential backoff
+                }
             }
         }
+        lastError?.printStackTrace()
+        return null
     }
 
     // ── Audio playback ────────────────────────────────────────────────────────
@@ -360,11 +585,11 @@ class RecordingActivity : AppCompatActivity() {
     // ── UI states ─────────────────────────────────────────────────────────────
 
     private fun setIdleUi() {
-        tvStatus.text    = if (roomCode.isNotEmpty()) "Room: $roomCode · ${provider.displayName}"
-                           else "Ready · ${provider.displayName}"
-        tvTimer.text     = formatTime(0)
-        btnRecord.text   = "⏺  Record"
-        btnRecord.alpha  = 1f
+        tvStatus.text   = if (roomCode.isNotEmpty()) "Room: $roomCode · ${provider.displayName}"
+                          else "Ready · ${provider.displayName}"
+        tvTimer.text    = formatTime(0)
+        btnRecord.text  = "⏺  Record"
+        btnRecord.alpha = 1f
         btnRecord.setBackgroundColor(getColor(R.color.gold_primary))
         btnRecord.isEnabled = true
     }
@@ -391,11 +616,14 @@ class RecordingActivity : AppCompatActivity() {
         blinkAnimator?.cancel()
         if (isRecording) audioRecorder.stopRecording()
         mediaPlayer?.release()
+        firebaseRepo?.stopListening()
     }
 
     companion object {
         private const val RC_AUDIO          = 200
         private const val MAX_SECONDS       = 60
         private const val WARNING_SECONDS   = 10
+        private const val MAX_RETRIES       = 2           // 1 initial + 2 retries = 3 total attempts
+        private const val RETRY_DELAY_MS    = 2_000L      // 2s → 4s backoff
     }
 }

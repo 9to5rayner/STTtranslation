@@ -6,7 +6,7 @@
     android:padding="10dp"
     android:layout_marginBottom="6dp">
 
-    <!-- ── Row 1: timestamp / edit hint / EDITED tag ── -->
+    <!-- ── Row 1: timestamp / edit hint / EDITED tag / send status ── -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -22,7 +22,7 @@
             android:textSize="11sp"
             android:textColor="@color/text_hint"/>
 
-        <!-- EDITED tag — only shown when isEdited = true -->
+        <!-- EDITED tag -->
         <TextView
             android:id="@+id/tvEdited"
             android:layout_width="wrap_content"
@@ -35,6 +35,16 @@
             android:paddingEnd="6dp"
             android:paddingTop="2dp"
             android:paddingBottom="2dp"
+            android:layout_marginEnd="6dp"
+            android:visibility="gone"/>
+
+        <!-- ✓ Sent / ⏳ Sending… / ⚠️ Not sent — outgoing only -->
+        <TextView
+            android:id="@+id/tvSendStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="10sp"
+            android:textColor="@color/text_secondary"
             android:layout_marginEnd="6dp"
             android:visibility="gone"/>
 
@@ -124,7 +134,40 @@
             android:textStyle="italic"/>
     </LinearLayout>
 
-    <!-- ── Translation bubble (gold) + play button ── -->
+    <!-- ── Translation error row + retry button ── -->
+    <LinearLayout
+        android:id="@+id/llTranslationError"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="28dp"
+        android:layout_marginBottom="4dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvTranslationError"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="11sp"
+            android:textColor="@color/recording_red"
+            android:textStyle="italic"/>
+
+        <ImageButton
+            android:id="@+id/btnRetryTranslation"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:src="@android:drawable/ic_popup_sync"
+            android:background="@drawable/bubble_navy"
+            android:tint="@color/gold_primary"
+            android:padding="10dp"
+            android:contentDescription="Retry translation"
+            android:visibility="gone"/>
+    </LinearLayout>
+
+    <!-- ── Translation bubble (gold) + play + retry-TTS buttons ── -->
     <LinearLayout
         android:id="@+id/llGoldRow"
         android:layout_width="match_parent"
@@ -159,7 +202,7 @@
             android:contentDescription="Play translation"
             android:visibility="gone"/>
 
-        <!-- ↻ Retry TTS button — shown only when ttsError != null -->
+        <!-- ↻ Retry TTS button -->
         <ImageButton
             android:id="@+id/btnRetryTts"
             android:layout_width="44dp"
@@ -192,7 +235,7 @@
             android:textStyle="italic"/>
     </LinearLayout>
 
-    <!-- ── TTS error row — shown only when ttsError != null ── -->
+    <!-- ── TTS error row ── -->
     <LinearLayout
         android:id="@+id/llTtsError"
         android:layout_width="match_parent"

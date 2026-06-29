@@ -7,17 +7,51 @@ data class TranscriptEntry(
     val originalText: String       = "",
     val translatedText: String     = "",
     val isEdited: Boolean          = false,     // shows EDITED tag on bubble
-    val audioFilePath: String?     = null,      // path to cached TTS .wav file
+    val audioFilePath: String?     = null,      // path to cached TTS .wav/.mp3 file
 
-    // Transient UI states — NOT persisted, reset on load
+    /**
+     * True for messages received from the remote partner via Firebase.
+     * BubbleAdapter uses this to flip bubble alignment and colors.
+     * NOT persisted — resets to false on load (incoming messages are
+     * still displayed, just without the incoming-specific decoration).
+     */
+    val isIncoming: Boolean        = false,
+
+    // ── Transient pipeline states — NOT persisted ─────────────────────────────
     val isTranscribing: Boolean    = false,
     val isTranslating: Boolean     = false,
     val isGeneratingTts: Boolean   = false,
 
-    // Set when TTS generation fails. Holds a short human-readable reason
-    // shown in the error tag; cleared (set back to null) when a retry is
-    // attempted or succeeds. NOT persisted — resets to null on load, same
-    // as the other transient flags, since a stale error from a previous
-    // session has no value and retry is always available fresh.
-    val ttsError: String?          = null
+    /**
+     * Set when translation fails after all retries (timeout, network, API
+     * error). Cleared on manual retry. NOT persisted.
+     * When non-null: TTS and Firebase send phases are both blocked.
+     * The bubble shows a ↻ retry translation button.
+     */
+    val translationError: String?  = null,
+
+    /**
+     * Set when TTS generation fails. Cleared on retry. NOT persisted.
+     * The bubble shows a ↻ retry TTS button independently of translationError.
+     */
+    val ttsError: String?          = null,
+
+    /**
+     * True while the Firebase write is in flight.
+     * Shows a small "Sending…" indicator on the bubble.
+     */
+    val isSendingToFirebase: Boolean = false,
+
+    /**
+     * True once Firebase confirmed the write succeeded.
+     * Shows a ✓ sent indicator on the bubble.
+     */
+    val isSentToFirebase: Boolean    = false,
+
+    /**
+     * Non-null when the Firebase send failed.
+     * Shows a ⚠️ send-failed indicator on the bubble.
+     * The user can tap it to retry the send manually (Phase 5 feature).
+     */
+    val sendError: String?           = null
 )

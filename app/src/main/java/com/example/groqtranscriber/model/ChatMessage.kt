@@ -6,91 +6,65 @@ import com.google.firebase.database.Exclude
  * Represents a fully-resolved message in the walkie-talkie conversation —
  * either sent by this device or received from the remote partner.
  *
- * Lifecycle of an OUTGOING message:
- *   1. Created locally with isPending = true after the 3-phase pipeline
- *      (transcribe → translate → TTS) completes in RecordingActivity.
- *   2. The TTS audio file is uploaded to Firebase Storage → ttsAudioUrl set.
- *   3. The message is written to the Firebase Realtime Database.
- *   4. isPending = false, isSent = true.
+ * No Firebase Storage is used. TTS audio is generated locally on each device
+ * from the translatedText — the sender generates it for themselves, and the
+ * receiver generates it independently using their own API key and provider.
+ * This means only text fields travel over the network.
  *
- * Lifecycle of an INCOMING message:
- *   1. Firebase ChildEventListener fires → ChatMessage deserialized from DB.
- *   2. isIncoming = true, ttsAudioUrl holds a remote URL.
- *   3. The audio is downloaded to local cache → localAudioPath set.
- *   4. Play button enabled; optionally auto-played.
+ * Firebase-persisted fields (written to Realtime Database):
+ *   id, senderId, senderNickname, timestampMs, originalText,
+ *   translatedText, targetLang
  *
- * Firebase serialization notes:
- *   - All fields must have default values so Gson / Firebase can deserialize
- *     with a no-arg constructor.
- *   - Transient UI fields (isPending, isDownloadingAudio) are NOT written to
- *     Firebase — they are local-only state managed at runtime.
- *   - ttsAudioUrl IS written to Firebase (it's the remote Storage URL).
- *   - localAudioPath is NOT written to Firebase (device-local cache path).
+ * Local-only fields (annotated @get:Exclude, never written to Firebase):
+ *   isIncoming, isPending, isSentToFirebase, localAudioPath,
+ *   ttsError, isGeneratingTts
+ *
+ * Serialization requirement:
+ *   All fields must have default values so Firebase can deserialize using
+ *   its no-arg constructor reflection path.
  */
 data class ChatMessage(
-    // ── Identity ──────────────────────────────────────────────────────────────
-    /** Stable unique ID — UUID generated at creation time. Used as the Firebase key. */
+
+    // ── Persisted to Firebase ─────────────────────────────────────────────────
+
+    /** Stable unique ID — UUID. Used as the explicit Firebase child key. */
     val id: String = "",
 
-    /** Device ID of the sender (UUID stored in SharedPreferences as "device_id"). */
+    /** device_id of the sender (UUID in SharedPreferences). Used to filter
+     *  incoming vs. outgoing on each device. */
     val senderId: String = "",
 
-    /** Optional display name chosen by the user (stored as "user_nickname"). */
+    /** Optional display name set by the user in RoomActivity. */
     val senderNickname: String = "",
 
-    // ── Timing ────────────────────────────────────────────────────────────────
     val timestampMs: Long = 0L,
 
-    // ── Content ───────────────────────────────────────────────────────────────
-    /** Raw transcription in Indonesian. */
+    /** Raw Indonesian transcription. */
     val originalText: String = "",
 
-    /** Translated text in targetLang. */
+    /** Translated text. The receiver uses this to generate TTS locally. */
     val translatedText: String = "",
 
-    /** The target language used for translation ("English" or "Japanese"). */
+    /** "English" or "Japanese" — lets the receiver know what was translated. */
     val targetLang: String = "English",
 
-    // ── Audio ─────────────────────────────────────────────────────────────────
-    /**
-     * Firebase Storage download URL for the TTS audio file.
-     * Null until the sender's upload completes, or if TTS generation failed.
-     * Written to the database so the receiver can download the file.
-     */
-    val ttsAudioUrl: String? = null,
+    // ── Local-only UI state (NOT written to Firebase) ─────────────────────────
 
-    // ── Local-only state (NOT persisted to Firebase) ──────────────────────────
-
-    /**
-     * True for messages sent by this device, false for received messages.
-     * Determines bubble alignment and color in the UI.
-     * Set at runtime by comparing senderId to the local device_id.
-     */
+    /** True when received from the remote partner; false for own messages. */
     @get:Exclude val isIncoming: Boolean = false,
 
-    /**
-     * True while the message is still being written to Firebase.
-     * Shows a "Sending…" indicator on the outgoing bubble.
-     */
+    /** True while waiting for the Firebase write to complete. */
     @get:Exclude val isPending: Boolean = false,
 
-    /**
-     * True while downloading the remote TTS audio to local cache.
-     * Shows a loading indicator on the incoming bubble's play button.
-     */
-    @get:Exclude val isDownloadingAudio: Boolean = false,
+    /** True once the message has been confirmed written to Firebase. */
+    @get:Exclude val isSentToFirebase: Boolean = false,
 
-    /**
-     * Local file path of the downloaded/generated TTS audio.
-     * Set after either:
-     *   - Sender: GeminiClient writes to filesDir (same as before)
-     *   - Receiver: audio downloaded from ttsAudioUrl to cacheDir
-     */
+    /** Absolute path to the locally generated TTS audio file. */
     @get:Exclude val localAudioPath: String? = null,
 
-    /**
-     * Non-null when TTS generation or audio download failed.
-     * Drives the ⚠️ error row + ↻ retry button on the bubble.
-     */
+    /** True while TTS audio is being generated (sender or receiver). */
+    @get:Exclude val isGeneratingTts: Boolean = false,
+
+    /** Non-null when TTS generation failed. Shows ⚠️ + ↻ retry on the bubble. */
     @get:Exclude val ttsError: String? = null
 )
