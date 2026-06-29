@@ -6,11 +6,6 @@
     android:orientation="horizontal"
     android:layout_marginBottom="10dp">
 
-    <!-- Column that holds the actual bubble content. Width capped at 85%
-         of the screen via layout_weight + a spacer on the opposite side,
-         so bubbles never span the full width like a document — they look
-         like chat messages. -->
-
     <!-- Left spacer (shown only for incoming/right-aligned messages) -->
     <View
         android:id="@+id/vSpacerStart"
@@ -44,7 +39,6 @@
                 android:textStyle="bold"
                 android:textColor="@color/navy_deep"/>
 
-            <!-- EDITED tag -->
             <TextView
                 android:id="@+id/tvEdited"
                 android:layout_width="wrap_content"
@@ -60,7 +54,6 @@
                 android:layout_marginEnd="6dp"
                 android:visibility="gone"/>
 
-            <!-- ✓ Sent / ⏳ Sending… / ⚠️ Not sent — outgoing only -->
             <TextView
                 android:id="@+id/tvSendStatus"
                 android:layout_width="wrap_content"
@@ -114,7 +107,7 @@
                 android:textStyle="italic"/>
         </LinearLayout>
 
-        <!-- ── Original-language bubble (own = navy, incoming = teal) ── -->
+        <!-- ── Original-language bubble ── -->
         <LinearLayout
             android:id="@+id/llOriginalRow"
             android:layout_width="match_parent"
@@ -132,6 +125,36 @@
                 android:textSize="14sp"
                 android:lineSpacingMultiplier="1.35"
                 android:padding="12dp"/>
+        </LinearLayout>
+
+        <!-- ── Awaiting confirmation row (NEW) ── -->
+        <LinearLayout
+            android:id="@+id/llAwaitingConfirmation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="⏳ Waiting for confirmation…"
+                android:textSize="12sp"
+                android:textColor="@color/gold_primary"
+                android:textStyle="italic"/>
+
+            <Button
+                android:id="@+id/btnConfirmTranscription"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Edit &amp; Confirm"
+                android:textSize="11sp"
+                android:textColor="@color/navy_deep"
+                android:backgroundTint="@color/gold_primary"
+                style="@style/Widget.MaterialComponents.Button"/>
         </LinearLayout>
 
         <!-- ── "Translating…" row ── -->
@@ -185,7 +208,7 @@
                 android:visibility="gone"/>
         </LinearLayout>
 
-        <!-- ── Translation bubble (own = gold, incoming = lavender) + play + retry-TTS ── -->
+        <!-- ── Translation bubble + play + retry-TTS ── -->
         <LinearLayout
             android:id="@+id/llTranslationRow"
             android:layout_width="match_parent"
@@ -204,7 +227,6 @@
                 android:lineSpacingMultiplier="1.35"
                 android:padding="12dp"/>
 
-            <!-- ▶ Play button -->
             <ImageButton
                 android:id="@+id/btnPlay"
                 android:layout_width="40dp"
@@ -217,7 +239,6 @@
                 android:contentDescription="Play translation"
                 android:visibility="gone"/>
 
-            <!-- ↻ Retry TTS button -->
             <ImageButton
                 android:id="@+id/btnRetryTts"
                 android:layout_width="40dp"

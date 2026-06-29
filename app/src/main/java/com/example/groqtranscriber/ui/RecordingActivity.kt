@@ -13,6 +13,7 @@ import android.view.animation.LinearInterpolator
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -33,9 +34,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import kotlin.coroutines.resume
 
 class RecordingActivity : AppCompatActivity() {
 
@@ -84,7 +87,6 @@ class RecordingActivity : AppCompatActivity() {
         btnClear  = findViewById(R.id.btnClear)
         rvFeed    = findViewById(R.id.rvFeed)
 
-        // ── Resolve API key (kie.ai only) ──────────────────────────────────────
         val prefs  = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("api_key", "") ?: ""
         if (apiKey.isEmpty()) {
@@ -92,11 +94,9 @@ class RecordingActivity : AppCompatActivity() {
             finish(); return
         }
 
-        // ── Language for this device ────────────────────────────────────────────
         myLanguage    = Language.fromName(intent.getStringExtra("MY_LANGUAGE"))
         theirLanguage = myLanguage.other
 
-        // ── Room / identity ───────────────────────────────────────────────────
         roomCode = intent.getStringExtra("ROOM_CODE") ?: ""
         deviceId = prefs.getString("device_id", "") ?: ""
         nickname = prefs.getString("user_nickname", "") ?: ""
@@ -105,17 +105,14 @@ class RecordingActivity : AppCompatActivity() {
         audioRecorder = AudioRecorder(this)
         audioChunker  = AudioChunker(this)
 
-        // ── Firebase ──────────────────────────────────────────────────────────
         if (roomCode.isNotEmpty() && deviceId.isNotEmpty()) {
             firebaseRepo = FirebaseRepository(roomCode, deviceId)
             attachFirebaseListener()
         }
 
-        // ── Load persisted history ────────────────────────────────────────────
         SessionData.entries.clear()
         SessionData.entries.addAll(SessionStore.load(this))
 
-        // ── RecyclerView ──────────────────────────────────────────────────────
         adapter = BubbleAdapter(
             context        = this,
             kieAiClient    = kieAiClient,
@@ -140,7 +137,6 @@ class RecordingActivity : AppCompatActivity() {
             rvFeed.scrollToPosition(SessionData.entries.size - 1)
         }
 
-        // ── Button wiring ─────────────────────────────────────────────────────
         btnRecord.setOnClickListener {
             if (isRecording) stopRecording() else requestPermissionAndRecord()
         }
@@ -161,23 +157,12 @@ class RecordingActivity : AppCompatActivity() {
 
     // ── Firebase listener ─────────────────────────────────────────────────────
 
-    /**
-     * Attaches the Firebase ChildEventListener. When an incoming ChatMessage
-     * arrives, it is converted to a TranscriptEntry (marked isIncoming = true)
-     * and the TTS phase is kicked off locally using the receiver's own API key.
-     */
     private fun attachFirebaseListener() {
         firebaseRepo?.listenForMessages { chatMessage ->
-            // Called on main thread for each new incoming message
             receiveIncomingMessage(chatMessage)
         }
     }
 
-    /**
-     * Handles a [ChatMessage] received from the remote partner.
-     * Adds it to the feed as an entry in "TTS generating" state, then
-     * kicks off local TTS generation.
-     */
     private fun receiveIncomingMessage(msg: ChatMessage) {
         val entry = TranscriptEntry(
             id              = System.currentTimeMillis(),
@@ -195,11 +180,8 @@ class RecordingActivity : AppCompatActivity() {
         rvFeed.smoothScrollToPosition(index)
         SessionStore.save(this, SessionData.entries)
 
-        // Generate TTS locally for the incoming translation
         if (msg.translatedText.isNotEmpty()) {
-            scope.launch {
-                runTtsPhase(index)
-            }
+            scope.launch { runTtsPhase(index) }
         }
     }
 
@@ -288,18 +270,11 @@ class RecordingActivity : AppCompatActivity() {
 
     // ── Pipeline ──────────────────────────────────────────────────────────────
     //
-    // Each phase has:
-    //   • A gate check at entry (validates previous phase output).
-    //   • Up to MAX_RETRIES attempts with RETRY_DELAY_MS backoff between them.
-    //   • On all retries exhausted: sets the appropriate error field on the
-    //     entry, notifies the adapter, and STOPS — does not cascade into the
-    //     next phase with bad data.
-    //
-    // Phase 1 → Transcription   (gate: audio file must exist and be non-empty)
-    // Phase 2 → Translation     (gate: originalText must be non-blank)
-    // Phase 3 → TTS             (gate: translatedText must be non-blank AND
-    //                                  translationError must be null)
-    // Phase 4 → Firebase send   (gate: translatedText non-blank, no errors)
+    // Phase 1 → Transcription
+    // Phase 1.5 → Confirm / Edit dialog  ← NEW
+    // Phase 2 → Translation
+    // Phase 3 → TTS
+    // Phase 4 → Firebase send
 
     private fun processRecording(file: File, startMs: Long, endMs: Long) {
         scope.launch {
@@ -317,21 +292,18 @@ class RecordingActivity : AppCompatActivity() {
             rvFeed.smoothScrollToPosition(index)
 
             // ═══════════════════════════════════════════════════════════════════
-            // PHASE 1 — TRANSCRIPTION  (with retry)
+            // PHASE 1 — TRANSCRIPTION
             // ═══════════════════════════════════════════════════════════════════
-            val original: String? = runWithRetry(
+            val rawTranscription: String? = runWithRetry(
                 tag        = "Transcription",
                 maxRetries = MAX_RETRIES
             ) {
                 withContext(Dispatchers.IO) { kieAiClient.transcribeAudio(file, myLanguage) }
             }
 
-            // Always clean up the audio file, regardless of success/failure
             withContext(Dispatchers.IO) { audioChunker.safelyDeleteChunk(file) }
 
-            // Gate: transcription must return non-blank text
-            if (original.isNullOrBlank()) {
-                // Silent clip or total failure — remove placeholder silently
+            if (rawTranscription.isNullOrBlank()) {
                 if (index < SessionData.entries.size) {
                     SessionData.entries.removeAt(index)
                     adapter.notifyItemRemoved(index)
@@ -340,31 +312,78 @@ class RecordingActivity : AppCompatActivity() {
                 return@launch
             }
 
-            // Phase 1 succeeded — show original-language bubble, mark translating
+            // Show transcription, mark as awaiting confirmation
             if (index >= SessionData.entries.size) return@launch
             SessionData.entries[index] = SessionData.entries[index].copy(
-                originalText   = original,
-                isTranscribing = false,
-                isTranslating  = true
+                originalText    = rawTranscription,
+                isTranscribing  = false,
+                isAwaitingConfirmation = true
             )
             adapter.notifyItemChanged(index)
             setIdleUi()
 
             // ═══════════════════════════════════════════════════════════════════
-            // PHASE 2 — TRANSLATION  (with retry)
+            // PHASE 1.5 — CONFIRM / EDIT DIALOG
+            // ═══════════════════════════════════════════════════════════════════
+            val confirmedText: String? = suspendCancellableCoroutine { cont ->
+                val editText = android.widget.EditText(this@RecordingActivity).apply {
+                    setText(rawTranscription)
+                    setSelection(rawTranscription.length)
+                    setPadding(48, 24, 48, 24)
+                    minLines = 2
+                    textSize = 15f
+                }
+
+                AlertDialog.Builder(this@RecordingActivity)
+                    .setTitle("Confirm Transcription")
+                    .setMessage("Review or edit before translating (${myLanguage.flag} ${myLanguage.displayName}):")
+                    .setView(editText)
+                    .setCancelable(false)
+                    .setPositiveButton("Translate ✓") { _, _ ->
+                        val text = editText.text.toString().trim()
+                        cont.resume(if (text.isEmpty()) null else text)
+                    }
+                    .setNegativeButton("Discard ✗") { _, _ ->
+                        cont.resume(null)
+                    }
+                    .show()
+            }
+
+            if (index >= SessionData.entries.size) return@launch
+
+            // User discarded — remove the bubble
+            if (confirmedText == null) {
+                SessionData.entries.removeAt(index)
+                adapter.notifyItemRemoved(index)
+                SessionStore.save(this@RecordingActivity, SessionData.entries)
+                return@launch
+            }
+
+            // Update with confirmed (possibly edited) text, mark translating
+            val wasEdited = confirmedText != rawTranscription
+            SessionData.entries[index] = SessionData.entries[index].copy(
+                originalText           = confirmedText,
+                isAwaitingConfirmation = false,
+                isEdited               = wasEdited,
+                isTranslating          = true
+            )
+            adapter.notifyItemChanged(index)
+            SessionStore.save(this@RecordingActivity, SessionData.entries)
+
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE 2 — TRANSLATION
             // ═══════════════════════════════════════════════════════════════════
             val translated: String? = runWithRetry(
                 tag        = "Translation",
                 maxRetries = MAX_RETRIES
             ) {
                 withContext(Dispatchers.IO) {
-                    kieAiClient.translateText(original, myLanguage, theirLanguage)
+                    kieAiClient.translateText(confirmedText, myLanguage, theirLanguage)
                 }
             }
 
             if (index >= SessionData.entries.size) return@launch
 
-            // Gate: if translation failed after all retries, stop the pipeline
             if (translated.isNullOrBlank()) {
                 SessionData.entries[index] = SessionData.entries[index].copy(
                     isTranslating    = false,
@@ -372,10 +391,9 @@ class RecordingActivity : AppCompatActivity() {
                 )
                 adapter.notifyItemChanged(index)
                 SessionStore.save(this@RecordingActivity, SessionData.entries)
-                return@launch  // ← pipeline stops here; TTS and Firebase are skipped
+                return@launch
             }
 
-            // Phase 2 succeeded — show translated bubble, mark TTS generating
             SessionData.entries[index] = SessionData.entries[index].copy(
                 translatedText   = translated,
                 isTranslating    = false,
@@ -387,8 +405,6 @@ class RecordingActivity : AppCompatActivity() {
             // ═══════════════════════════════════════════════════════════════════
             // PHASE 3 — TTS
             // ═══════════════════════════════════════════════════════════════════
-            // Errors are recorded on ttsError; the pipeline continues to Phase 4
-            // regardless (Firebase send does not depend on TTS succeeding).
             runTtsPhase(index)
 
             // ═══════════════════════════════════════════════════════════════════
@@ -397,7 +413,6 @@ class RecordingActivity : AppCompatActivity() {
             if (index >= SessionData.entries.size) return@launch
             val finalEntry = SessionData.entries[index]
 
-            // Gate: only send if we have valid text content
             if (finalEntry.originalText.isBlank() || finalEntry.translatedText.isBlank()) {
                 return@launch
             }
@@ -408,17 +423,10 @@ class RecordingActivity : AppCompatActivity() {
 
     // ── Shared TTS phase ──────────────────────────────────────────────────────
 
-    /**
-     * Runs TTS generation for the entry at [index] using its current
-     * translatedText. Updates the entry in place with either a file path
-     * (success) or a ttsError string (failure). Called from both the outgoing
-     * pipeline and the incoming message handler.
-     */
     private suspend fun runTtsPhase(index: Int) {
         if (index >= SessionData.entries.size) return
         val entry = SessionData.entries[index]
 
-        // Gate: don't attempt TTS if there's no translated text or a translation error
         if (entry.translatedText.isBlank() || entry.translationError != null) {
             if (index < SessionData.entries.size) {
                 SessionData.entries[index] = entry.copy(isGeneratingTts = false)
@@ -466,7 +474,6 @@ class RecordingActivity : AppCompatActivity() {
     private fun sendToFirebase(index: Int, entry: TranscriptEntry, timestampMs: Long) {
         val repo = firebaseRepo ?: return
 
-        // Mark as pending in UI
         if (index < SessionData.entries.size) {
             SessionData.entries[index] = entry.copy(isSendingToFirebase = true)
             adapter.notifyItemChanged(index)
@@ -515,11 +522,6 @@ class RecordingActivity : AppCompatActivity() {
 
     // ── Retry helper ──────────────────────────────────────────────────────────
 
-    /**
-     * Runs [block] up to [maxRetries] + 1 times (1 initial attempt + retries).
-     * Returns the result on success, or null if all attempts fail.
-     * Waits [RETRY_DELAY_MS] between attempts (doubles each time).
-     */
     private suspend fun <T> runWithRetry(
         tag: String,
         maxRetries: Int,
@@ -531,7 +533,6 @@ class RecordingActivity : AppCompatActivity() {
         repeat(maxRetries + 1) { attempt ->
             try {
                 val result = block()
-                // Validate that string results are non-blank
                 if (result is String && result.isBlank()) {
                     throw Exception("$tag returned blank result")
                 }
@@ -540,7 +541,7 @@ class RecordingActivity : AppCompatActivity() {
                 lastError = e
                 if (attempt < maxRetries) {
                     delay(delayMs)
-                    delayMs *= 2  // exponential backoff
+                    delayMs *= 2
                 }
             }
         }
@@ -586,7 +587,7 @@ class RecordingActivity : AppCompatActivity() {
     }
 
     private fun setProcessingUi() {
-        tvStatus.text       = "⏳ Processing…"
+        tvStatus.text       = "⏳ Transcribing…"
         btnRecord.text      = "⏺  Record"
         btnRecord.isEnabled = false
         btnRecord.alpha     = 0.5f
@@ -608,7 +609,7 @@ class RecordingActivity : AppCompatActivity() {
         private const val RC_AUDIO          = 200
         private const val MAX_SECONDS       = 60
         private const val WARNING_SECONDS   = 10
-        private const val MAX_RETRIES       = 2           // 1 initial + 2 retries = 3 total attempts
-        private const val RETRY_DELAY_MS    = 2_000L      // 2s → 4s backoff
+        private const val MAX_RETRIES       = 2
+        private const val RETRY_DELAY_MS    = 2_000L
     }
 }

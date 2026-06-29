@@ -22,7 +22,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Meeting Scribe"
+                android:text="BizCommunicator"
                 android:textSize="26sp"
                 android:textStyle="bold"
                 android:textColor="@color/navy_deep"
@@ -77,7 +77,7 @@
                     android:id="@+id/etNickname"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="e.g. Brother David"
+                    android:hint="e.g. David (Sales)"
                     android:textSize="15sp"
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_hint"
@@ -144,7 +144,6 @@
                     android:lineSpacingMultiplier="1.4"
                     android:layout_marginBottom="16dp"/>
 
-                <!-- Room code display box -->
                 <TextView
                     android:id="@+id/tvRoomCode"
                     android:layout_width="match_parent"
@@ -159,7 +158,6 @@
                     android:background="@color/gold_pale"
                     android:layout_marginBottom="16dp"/>
 
-                <!-- Create button -->
                 <Button
                     android:id="@+id/btnCreate"
                     android:layout_width="match_parent"
@@ -172,7 +170,6 @@
                     android:layout_marginBottom="8dp"
                     style="@style/Widget.MaterialComponents.Button"/>
 
-                <!-- Start (enter room) button — disabled until code is generated -->
                 <Button
                     android:id="@+id/btnStartRoom"
                     android:layout_width="match_parent"

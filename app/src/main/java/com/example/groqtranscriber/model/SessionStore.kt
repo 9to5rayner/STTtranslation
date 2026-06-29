@@ -6,12 +6,6 @@ import com.google.gson.GsonBuilder
 import com.google.gson.reflect.TypeToken
 import java.io.File
 
-/**
- * Persists TranscriptEntry list to a JSON file in internal storage.
- * Called on session end (save) and app start (load).
- *
- * All transient flags are always reset on load — they only make sense at runtime.
- */
 object SessionStore {
 
     private const val FILE_NAME = "session_history.json"
@@ -28,18 +22,17 @@ object SessionStore {
         return try {
             val type = object : TypeToken<List<TranscriptEntry>>() {}.type
             val loaded: List<TranscriptEntry> = gson.fromJson(file.readText(), type)
-            // Reset ALL transient flags — they have no meaning across sessions
             loaded.map {
                 it.copy(
-                    isIncoming          = false,
-                    isTranscribing      = false,
-                    isTranslating       = false,
-                    isGeneratingTts     = false,
-                    translationError    = null,
-                    ttsError            = null,
-                    isSendingToFirebase = false,
-                    // isSentToFirebase is kept — it's a historical fact, not a live state
-                    sendError           = null
+                    isIncoming             = false,
+                    isTranscribing         = false,
+                    isAwaitingConfirmation = false,   // never survives a restart
+                    isTranslating          = false,
+                    isGeneratingTts        = false,
+                    translationError       = null,
+                    ttsError               = null,
+                    isSendingToFirebase    = false,
+                    sendError              = null
                 )
             }.toMutableList()
         } catch (e: Exception) {

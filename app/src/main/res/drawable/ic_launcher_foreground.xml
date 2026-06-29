@@ -5,46 +5,90 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Background -->
+    <!-- Dark navy background fill -->
     <path
-        android:fillColor="#16213E"
+        android:fillColor="#1A2744"
         android:pathData="M0,0h108v108h-108z"/>
 
-    <!-- Gold circle -->
+    <!-- Gold circle backdrop -->
     <path
-        android:fillColor="#D4AF37"
-        android:pathData="
-            M54,18
-            A36,36 0 1,1 53.9,18
-            Z"/>
+        android:fillColor="#C9A84C"
+        android:pathData="M54,16 A38,38 0 1,1 53.9,16 Z"/>
 
-    <!-- White microphone -->
+    <!-- Briefcase body (white) -->
     <path
         android:fillColor="#FFFFFF"
         android:pathData="
-            M54,33
-            a9,9 0 0,1 9,9
-            v18
-            a9,9 0 0,1 -18,0
-            v-18
-            a9,9 0 0,1 9,-9
+            M34,46
+            Q34,43 37,43
+            L71,43
+            Q74,43 74,46
+            L74,68
+            Q74,71 71,71
+            L37,71
+            Q34,71 34,68
             Z"/>
 
+    <!-- Briefcase handle (navy) -->
     <path
-        android:fillColor="#FFFFFF"
+        android:fillColor="#1A2744"
         android:pathData="
-            M39,51
-            a15,15 0 0,0 30,0
-            h4
-            a19,19 0 0,1 -17,18
-            v7
-            h8
-            v4
-            h-20
-            v-4
-            h8
-            v-7
-            a19,19 0 0,1 -17,-18
-            z"/>
+            M44,43
+            L44,38
+            Q44,35 47,35
+            L61,35
+            Q64,35 64,38
+            L64,43"/>
+    <path
+        android:strokeColor="#1A2744"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="
+            M44,43
+            L44,38
+            Q44,35 47,35
+            L61,35
+            Q64,35 64,38
+            L64,43"/>
+
+    <!-- Briefcase centre divider line (navy) -->
+    <path
+        android:strokeColor="#1A2744"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000"
+        android:pathData="M34,57 L74,57"/>
+
+    <!-- Briefcase latch dot (gold) -->
+    <path
+        android:fillColor="#C9A84C"
+        android:pathData="M54,57 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0"/>
+
+    <!-- Speech bubble tail + body (gold) — bottom-right corner -->
+    <path
+        android:fillColor="#C9A84C"
+        android:pathData="
+            M60,74
+            Q60,71 63,71
+            L80,71
+            Q83,71 83,74
+            L83,84
+            Q83,87 80,87
+            L68,87
+            L64,92
+            L65,87
+            L63,87
+            Q60,87 60,84
+            Z"/>
+
+    <!-- Three dots inside speech bubble (navy) -->
+    <path
+        android:fillColor="#1A2744"
+        android:pathData="M67,79 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0"/>
+    <path
+        android:fillColor="#1A2744"
+        android:pathData="M72,79 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0"/>
+    <path
+        android:fillColor="#1A2744"
+        android:pathData="M77,79 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0"/>
 
 </vector>

@@ -23,25 +23,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/**
- * Renders each TranscriptEntry as a real chat-app bubble.
- *
- * OUTGOING (isIncoming = false) — LEFT-aligned, own nickname, navy/gold bubbles:
- *   [Me]  0:12  ·  tap to edit       [EDITED]  [✓ Sent / ⏳ Sending / ⚠️ Failed]
- *   🗨  navy bubble (spoken language)
- *   🗨  gold bubble (translated)                                       ▶  ↻(tts)
- *
- * INCOMING (isIncoming = true) — RIGHT-aligned, partner's nickname, teal/lavender bubbles:
- *                                                          0:12  [Partner]
- *                                          teal bubble (their spoken language)  🗨
- *                                  lavender bubble (translated for me)  🗨  ▶  ↻(tts)
- *
- * Pipeline gates enforced here:
- *   - retryTranslation: re-runs translation, then only proceeds to TTS if
- *     the new translation is non-blank (same gate as the main pipeline).
- *   - retryTts: only runs if translatedText is non-blank AND translationError
- *     is null (same gate as Phase 3 in RecordingActivity).
- */
 class BubbleAdapter(
     private val context:        Context,
     private val kieAiClient:    KieAiClient,
@@ -79,6 +60,10 @@ class BubbleAdapter(
         val llTranslationError:  LinearLayout = view.findViewById(R.id.llTranslationError)
         val tvTranslationError:  TextView     = view.findViewById(R.id.tvTranslationError)
         val btnRetryTranslation: ImageButton  = view.findViewById(R.id.btnRetryTranslation)
+
+        // Confirmation row
+        val llAwaitingConfirmation: LinearLayout = view.findViewById(R.id.llAwaitingConfirmation)
+        val btnConfirmTranscription: android.widget.Button = view.findViewById(R.id.btnConfirmTranscription)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
@@ -92,8 +77,6 @@ class BubbleAdapter(
     private fun bind(h: BubbleVH, e: TranscriptEntry, pos: Int) {
 
         // ── Left/right alignment ──────────────────────────────────────────────
-        // Outgoing (own) = LEFT-aligned: hide the start spacer, show the end one.
-        // Incoming (partner) = RIGHT-aligned: show the start spacer, hide the end one.
         h.vSpacerStart.visibility = if (e.isIncoming) View.VISIBLE else View.GONE
         h.vSpacerEnd.visibility   = if (e.isIncoming) View.GONE else View.VISIBLE
 
@@ -104,10 +87,12 @@ class BubbleAdapter(
         )
         h.tvTimestamp.text = formatTs(e.timestampStart)
 
-        h.tvEdited.visibility    = if (!e.isIncoming && e.isEdited) View.VISIBLE else View.GONE
-        h.tvEditHint.visibility  = if (!e.isIncoming && e.originalText.isNotEmpty() &&
+        h.tvEdited.visibility   = if (!e.isIncoming && e.isEdited) View.VISIBLE else View.GONE
+
+        // Hide "tap to edit" while awaiting confirmation — the confirm button serves that purpose
+        h.tvEditHint.visibility = if (!e.isIncoming && e.originalText.isNotEmpty() &&
                                        !e.isTranscribing && !e.isTranslating &&
-                                       !e.isGeneratingTts) View.VISIBLE else View.GONE
+                                       !e.isGeneratingTts && !e.isAwaitingConfirmation) View.VISIBLE else View.GONE
 
         // ── Send status (outgoing only) ───────────────────────────────────────
         h.tvSendStatus.visibility = if (!e.isIncoming && e.originalText.isNotEmpty()) {
@@ -119,7 +104,7 @@ class BubbleAdapter(
             e.sendError != null     -> "⚠️ Not sent"
             e.isSendingToFirebase   -> "⏳ Sending…"
             e.isSentToFirebase      -> "✓ Sent"
-            else                    -> ""  // local-only (no room) or pre-send
+            else                    -> ""
         }
 
         // ── Transcribing placeholder ──────────────────────────────────────────
@@ -131,10 +116,21 @@ class BubbleAdapter(
         h.tvOriginal.text = "$originalFlag ${e.originalText}"
         h.tvOriginal.setBackgroundResource(if (e.isIncoming) R.drawable.bubble_teal else R.drawable.bubble_navy)
 
+        // ── Awaiting confirmation row ─────────────────────────────────────────
+        h.llAwaitingConfirmation.visibility =
+            if (!e.isIncoming && e.isAwaitingConfirmation) View.VISIBLE else View.GONE
+
+        h.btnConfirmTranscription.setOnClickListener {
+            val p = h.adapterPosition
+            if (p == RecyclerView.NO_POSITION || p >= SessionData.entries.size) return@setOnClickListener
+            // Tapping the inline button opens an edit dialog then confirms
+            showInlineConfirmDialog(p)
+        }
+
         // ── "Translating…" row ────────────────────────────────────────────────
         h.llTranslating.visibility = if (e.isTranslating) View.VISIBLE else View.GONE
 
-        // ── Translation error row (outgoing only) ─────────────────────────────
+        // ── Translation error row ─────────────────────────────────────────────
         val hasTranslationError = !e.isIncoming && e.translationError != null
         h.llTranslationError.visibility = if (hasTranslationError) View.VISIBLE else View.GONE
         if (hasTranslationError) {
@@ -177,28 +173,106 @@ class BubbleAdapter(
                 ?: Toast.makeText(context, "Audio not ready yet.", Toast.LENGTH_SHORT).show()
         }
 
-        // ── Tap to edit (outgoing only) ───────────────────────────────────────
+        // ── Tap to edit (outgoing only, after translation done) ───────────────
         h.itemView.setOnClickListener {
             if (e.isIncoming) return@setOnClickListener
             val p = h.adapterPosition
             if (p == RecyclerView.NO_POSITION || p >= SessionData.entries.size) return@setOnClickListener
             val entry = SessionData.entries[p]
-            if (entry.isTranscribing || entry.isTranslating || entry.isGeneratingTts) return@setOnClickListener
+            if (entry.isTranscribing || entry.isAwaitingConfirmation ||
+                entry.isTranslating || entry.isGeneratingTts) return@setOnClickListener
             showEditDialog(entry, p)
         }
     }
 
-    // ── Translation retry ─────────────────────────────────────────────────────
+    // ── Inline confirm dialog (from the bubble button) ────────────────────────
 
     /**
-     * Re-runs the translation phase for the entry at [index].
-     * Gate: originalText must be non-blank (should always be true at this point).
-     * On success, clears translationError and proceeds to TTS.
-     * On failure, updates translationError and stops.
-     *
-     * Only ever wired to outgoing (own) bubbles, so the direction is always
-     * myLanguage → theirLanguage.
+     * Shown when the user taps "Edit & Confirm" on the awaiting-confirmation
+     * bubble. Lets them make corrections, then kicks off translation directly
+     * from the adapter (mirrors what RecordingActivity does for new recordings).
      */
+    private fun showInlineConfirmDialog(index: Int) {
+        if (index < 0 || index >= SessionData.entries.size) return
+        val entry = SessionData.entries[index]
+
+        val editText = EditText(context).apply {
+            setText(entry.originalText)
+            setSelection(entry.originalText.length)
+            setPadding(48, 24, 48, 24)
+            minLines = 2
+            textSize = 15f
+        }
+
+        AlertDialog.Builder(context)
+            .setTitle("Confirm Transcription")
+            .setMessage("Review or edit before translating (${myLanguage.flag} ${myLanguage.displayName}):")
+            .setView(editText)
+            .setCancelable(false)
+            .setPositiveButton("Translate ✓") { _, _ ->
+                val confirmed = editText.text.toString().trim()
+                if (confirmed.isEmpty()) {
+                    Toast.makeText(context, "Cannot be empty.", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val wasEdited = confirmed != entry.originalText
+                val updating = SessionData.entries[index].copy(
+                    originalText           = confirmed,
+                    isAwaitingConfirmation = false,
+                    isEdited               = wasEdited,
+                    isTranslating          = true,
+                    translationError       = null
+                )
+                SessionData.entries[index] = updating
+                notifyItemChanged(index)
+                onEntryUpdated(index, updating)
+
+                scope.launch {
+                    val translated: String? = try {
+                        withContext(Dispatchers.IO) {
+                            kieAiClient.translateText(confirmed, myLanguage, theirLanguage)
+                        }.takeIf { it.isNotBlank() }
+                    } catch (e: Exception) { null }
+
+                    if (index >= SessionData.entries.size) return@launch
+
+                    if (translated.isNullOrBlank()) {
+                        val failed = SessionData.entries[index].copy(
+                            isTranslating    = false,
+                            translationError = "Translation failed. Tap ↻ to retry."
+                        )
+                        SessionData.entries[index] = failed
+                        notifyItemChanged(index)
+                        onEntryUpdated(index, failed)
+                        return@launch
+                    }
+
+                    val afterTranslate = SessionData.entries[index].copy(
+                        translatedText   = translated,
+                        isTranslating    = false,
+                        translationError = null,
+                        isGeneratingTts  = true
+                    )
+                    SessionData.entries[index] = afterTranslate
+                    notifyItemChanged(index)
+                    onEntryUpdated(index, afterTranslate)
+
+                    runTtsPhase(index)
+                }
+            }
+            .setNegativeButton("Discard ✗") { _, _ ->
+                // Remove the entry entirely
+                if (index < SessionData.entries.size) {
+                    SessionData.entries.removeAt(index)
+                    notifyItemRemoved(index)
+                    onEntryUpdated(index, TranscriptEntry(timestampStart = 0, timestampEnd = 0))
+                }
+            }
+            .show()
+    }
+
+    // ── Translation retry ─────────────────────────────────────────────────────
+
     fun retryTranslation(index: Int) {
         if (index < 0 || index >= SessionData.entries.size) return
         val entry = SessionData.entries[index]
@@ -228,7 +302,6 @@ class BubbleAdapter(
             if (index >= SessionData.entries.size) return@launch
 
             if (translated.isNullOrBlank()) {
-                // Translation still failing — record error, stop
                 val failed = SessionData.entries[index].copy(
                     isTranslating    = false,
                     translationError = "Translation failed. Tap ↻ to retry again."
@@ -239,7 +312,6 @@ class BubbleAdapter(
                 return@launch
             }
 
-            // Translation succeeded — proceed to TTS
             val afterTranslate = SessionData.entries[index].copy(
                 translatedText   = translated,
                 isTranslating    = false,
@@ -256,15 +328,10 @@ class BubbleAdapter(
 
     // ── TTS retry ─────────────────────────────────────────────────────────────
 
-    /**
-     * Re-runs the TTS phase for the entry at [index].
-     * Gate: translatedText must be non-blank AND translationError must be null.
-     */
     fun retryTts(index: Int) {
         if (index < 0 || index >= SessionData.entries.size) return
         val entry = SessionData.entries[index]
 
-        // Gate check
         if (entry.translatedText.isBlank() || entry.translationError != null || entry.isGeneratingTts) return
 
         val withLoading = entry.copy(isGeneratingTts = true, ttsError = null)
@@ -281,7 +348,6 @@ class BubbleAdapter(
         if (index >= SessionData.entries.size) return
         val entry = SessionData.entries[index]
 
-        // Gate: don't attempt TTS if translation didn't succeed
         if (entry.translatedText.isBlank() || entry.translationError != null) {
             if (index < SessionData.entries.size) {
                 SessionData.entries[index] = entry.copy(isGeneratingTts = false)
@@ -325,7 +391,7 @@ class BubbleAdapter(
         onEntryUpdated(index, final)
     }
 
-    // ── Edit dialog (outgoing only) ───────────────────────────────────────────
+    // ── Edit dialog (outgoing only, post-translation) ─────────────────────────
 
     private fun showEditDialog(entry: TranscriptEntry, index: Int) {
         val editText = EditText(context).apply {
