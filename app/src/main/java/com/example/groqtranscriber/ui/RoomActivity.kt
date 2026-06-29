@@ -9,6 +9,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.example.groqtranscriber.R
+import com.example.groqtranscriber.model.Language
 import java.util.UUID
 
 /**
@@ -19,18 +20,16 @@ import java.util.UUID
  *    it, and waits for the user to tap "Start" once their partner has joined.
  *  - JOIN: user types in the code their partner shared, then taps "Join".
  *
+ * A nickname is now REQUIRED — it's shown on every chat bubble (own messages
+ * on the left under your name, partner's on the right under theirs), so an
+ * empty name would make the chat impossible to follow.
+ *
  * In both cases, the room code and this device's stable UUID are written to
  * SharedPreferences before RecordingActivity is launched.
  *
  * Device identity:
  *   A UUID is generated once on first run and stored as "device_id".
- *   It never changes. The user can optionally set a nickname ("user_nickname")
- *   which is shown on their own bubbles by the remote partner.
- *
- * What this activity does NOT do:
- *   - No Firebase calls yet (Phase 3).
- *   - No validation that the room code actually exists in the database.
- *     That check will happen in RecordingActivity when the listener attaches.
+ *   It never changes. The nickname ("user_nickname") is required from here on.
  */
 class RoomActivity : AppCompatActivity() {
 
@@ -42,16 +41,14 @@ class RoomActivity : AppCompatActivity() {
     private lateinit var etJoinCode:    EditText
     private lateinit var btnJoin:       Button
 
-    // ── Extras passed from LaunchActivity ─────────────────────────────────────
-    private lateinit var targetLang:    String
-    private lateinit var apiProvider:   String
+    // ── Extra passed from LaunchActivity ────────────────────────────────────
+    private lateinit var myLanguage:    String
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_room)
 
-        targetLang  = intent.getStringExtra("TARGET_LANG")   ?: "English"
-        apiProvider = intent.getStringExtra("API_PROVIDER")  ?: "GOOGLE_GEMINI"
+        myLanguage = intent.getStringExtra("MY_LANGUAGE") ?: Language.INDONESIAN.name
 
         etNickname   = findViewById(R.id.etNickname)
         tvRoomCode   = findViewById(R.id.tvRoomCode)
@@ -73,6 +70,7 @@ class RoomActivity : AppCompatActivity() {
         // ── CREATE path ────────────────────────────────────────────────────────
 
         btnCreate.setOnClickListener {
+            if (!requireNickname()) return@setOnClickListener
             val code = generateRoomCode()
             tvRoomCode.text = code
             btnStartRoom.isEnabled = true
@@ -86,6 +84,7 @@ class RoomActivity : AppCompatActivity() {
         }
 
         btnStartRoom.setOnClickListener {
+            if (!requireNickname()) return@setOnClickListener
             val code = tvRoomCode.text.toString().trim()
             if (code.length != ROOM_CODE_LENGTH) {
                 Toast.makeText(this, "Tap 'Create Room' first.", Toast.LENGTH_SHORT).show()
@@ -97,6 +96,7 @@ class RoomActivity : AppCompatActivity() {
         // ── JOIN path ──────────────────────────────────────────────────────────
 
         btnJoin.setOnClickListener {
+            if (!requireNickname()) return@setOnClickListener
             val raw = etJoinCode.text.toString().trim().uppercase()
             if (raw.length != ROOM_CODE_LENGTH) {
                 Toast.makeText(
@@ -112,10 +112,20 @@ class RoomActivity : AppCompatActivity() {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /** Returns true if a non-blank nickname is present; otherwise shows a toast and returns false. */
+    private fun requireNickname(): Boolean {
+        val name = etNickname.text.toString().trim()
+        if (name.isEmpty()) {
+            Toast.makeText(this, "Please enter your name first.", Toast.LENGTH_SHORT).show()
+            return false
+        }
+        return true
+    }
+
     private fun launchRecording(roomCode: String) {
         val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
 
-        // Persist nickname (may be blank — that's fine)
+        // Persist nickname (now guaranteed non-blank by requireNickname())
         val nickname = etNickname.text.toString().trim()
         prefs.edit().putString("user_nickname", nickname).apply()
 
@@ -124,9 +134,8 @@ class RoomActivity : AppCompatActivity() {
 
         startActivity(
             Intent(this, RecordingActivity::class.java).apply {
-                putExtra("TARGET_LANG",   targetLang)
-                putExtra("API_PROVIDER",  apiProvider)
-                putExtra("ROOM_CODE",     roomCode)
+                putExtra("MY_LANGUAGE", myLanguage)
+                putExtra("ROOM_CODE",   roomCode)
             }
         )
     }

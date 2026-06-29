@@ -7,11 +7,17 @@ data class TranscriptEntry(
     val originalText: String       = "",
     val translatedText: String     = "",
     val isEdited: Boolean          = false,     // shows EDITED tag on bubble
-    val audioFilePath: String?     = null,      // path to cached TTS .wav/.mp3 file
+    val audioFilePath: String?     = null,      // path to cached TTS .mp3 file
+
+    /**
+     * Display name shown on the bubble — this device's own nickname for
+     * outgoing entries, or the partner's nickname for incoming ones.
+     */
+    val senderNickname: String     = "",
 
     /**
      * True for messages received from the remote partner via Firebase.
-     * BubbleAdapter uses this to flip bubble alignment and colors.
+     * BubbleAdapter uses this to flip bubble alignment (left/right) and colors.
      * NOT persisted — resets to false on load (incoming messages are
      * still displayed, just without the incoming-specific decoration).
      */
@@ -51,7 +57,7 @@ data class TranscriptEntry(
     /**
      * Non-null when the Firebase send failed.
      * Shows a ⚠️ send-failed indicator on the bubble.
-     * The user can tap it to retry the send manually (Phase 5 feature).
+     * The user can tap it to retry the send manually.
      */
     val sendError: String?           = null
 )

@@ -66,7 +66,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="API KEY"
+                    android:text="KIE.AI API KEY"
                     android:textSize="11sp"
                     android:textColor="@color/text_secondary"
                     android:letterSpacing="0.1"
@@ -77,48 +77,13 @@
                     android:id="@+id/etApiKey"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="Paste your API key here"
+                    android:hint="Paste your kie.ai API key here"
                     android:textSize="14sp"
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_hint"
                     android:backgroundTint="@color/divider"
                     android:inputType="textVisiblePassword"
                     android:fontFamily="monospace"/>
-
-            </LinearLayout>
-        </androidx.cardview.widget.CardView>
-
-        <!-- Provider Card -->
-        <androidx.cardview.widget.CardView
-            xmlns:card_view="http://schemas.android.com/apk/res-auto"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            card_view:cardCornerRadius="12dp"
-            card_view:cardElevation="2dp"
-            card_view:cardBackgroundColor="@color/cream_card"
-            android:layout_marginBottom="16dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="AI PROVIDER"
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary"
-                    android:letterSpacing="0.1"
-                    android:textAllCaps="true"
-                    android:layout_marginBottom="8dp"/>
-
-                <Spinner
-                    android:id="@+id/spProvider"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:backgroundTint="@color/navy_deep"/>
 
             </LinearLayout>
         </androidx.cardview.widget.CardView>
@@ -142,11 +107,20 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="TRANSLATION LANGUAGE"
+                    android:text="I WILL SPEAK"
                     android:textSize="11sp"
                     android:textColor="@color/text_secondary"
                     android:letterSpacing="0.1"
                     android:textAllCaps="true"
+                    android:layout_marginBottom="4dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Your speech is transcribed in this language and translated into the other for your partner."
+                    android:textSize="12sp"
+                    android:textColor="@color/text_hint"
+                    android:lineSpacingMultiplier="1.3"
                     android:layout_marginBottom="12dp"/>
 
                 <RadioGroup
@@ -156,21 +130,21 @@
                     android:orientation="horizontal">
 
                     <RadioButton
-                        android:id="@+id/rbEnglish"
+                        android:id="@+id/rbIndonesian"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="English"
+                        android:text="🇮🇩 Indonesian"
                         android:textColor="@color/text_primary"
                         android:buttonTint="@color/navy_deep"
                         android:checked="true"/>
 
                     <RadioButton
-                        android:id="@+id/rbJapanese"
+                        android:id="@+id/rbEnglish"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Japanese"
+                        android:text="🇬🇧 English"
                         android:textColor="@color/text_primary"
                         android:buttonTint="@color/navy_deep"/>
                 </RadioGroup>
@@ -181,7 +155,7 @@
             android:id="@+id/btnLaunch"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="Start Session"
+            android:text="Continue"
             android:textSize="16sp"
             android:textStyle="bold"
             android:textColor="@color/navy_deep"

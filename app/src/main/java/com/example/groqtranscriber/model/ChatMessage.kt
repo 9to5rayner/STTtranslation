@@ -8,12 +8,12 @@ import com.google.firebase.database.Exclude
  *
  * No Firebase Storage is used. TTS audio is generated locally on each device
  * from the translatedText — the sender generates it for themselves, and the
- * receiver generates it independently using their own API key and provider.
+ * receiver generates it independently using their own API key.
  * This means only text fields travel over the network.
  *
  * Firebase-persisted fields (written to Realtime Database):
  *   id, senderId, senderNickname, timestampMs, originalText,
- *   translatedText, targetLang
+ *   translatedText, sourceLang, targetLang
  *
  * Local-only fields (annotated @get:Exclude, never written to Firebase):
  *   isIncoming, isPending, isSentToFirebase, localAudioPath,
@@ -34,19 +34,22 @@ data class ChatMessage(
      *  incoming vs. outgoing on each device. */
     val senderId: String = "",
 
-    /** Optional display name set by the user in RoomActivity. */
+    /** Display name set by the user in RoomActivity. Shown on their bubble. */
     val senderNickname: String = "",
 
     val timestampMs: Long = 0L,
 
-    /** Raw Indonesian transcription. */
+    /** Raw transcription, in the sender's spoken language. */
     val originalText: String = "",
 
     /** Translated text. The receiver uses this to generate TTS locally. */
     val translatedText: String = "",
 
-    /** "English" or "Japanese" — lets the receiver know what was translated. */
-    val targetLang: String = "English",
+    /** "INDONESIAN" or "ENGLISH" — the language the sender spoke. */
+    val sourceLang: String = "INDONESIAN",
+
+    /** "INDONESIAN" or "ENGLISH" — the language translatedText is in. */
+    val targetLang: String = "ENGLISH",
 
     // ── Local-only UI state (NOT written to Firebase) ─────────────────────────
 

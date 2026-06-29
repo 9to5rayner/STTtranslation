@@ -1,259 +1,282 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/llBubbleRoot"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="10dp"
-    android:layout_marginBottom="6dp">
+    android:orientation="horizontal"
+    android:layout_marginBottom="10dp">
 
-    <!-- ── Row 1: timestamp / edit hint / EDITED tag / send status ── -->
+    <!-- Column that holds the actual bubble content. Width capped at 85%
+         of the screen via layout_weight + a spacer on the opposite side,
+         so bubbles never span the full width like a document — they look
+         like chat messages. -->
+
+    <!-- Left spacer (shown only for incoming/right-aligned messages) -->
+    <View
+        android:id="@+id/vSpacerStart"
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_weight="1"
+        android:visibility="gone"/>
+
     <LinearLayout
-        android:layout_width="match_parent"
+        android:id="@+id/llBubbleColumn"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginBottom="6dp">
+        android:layout_weight="6"
+        android:orientation="vertical"
+        android:padding="6dp">
 
-        <TextView
-            android:id="@+id/tvTimestamp"
-            android:layout_width="0dp"
+        <!-- ── Row 1: nickname / edit hint / EDITED tag / send status ── -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="11sp"
-            android:textColor="@color/text_hint"/>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
 
-        <!-- EDITED tag -->
-        <TextView
-            android:id="@+id/tvEdited"
+            <TextView
+                android:id="@+id/tvNickname"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/navy_deep"/>
+
+            <!-- EDITED tag -->
+            <TextView
+                android:id="@+id/tvEdited"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="EDITED"
+                android:textSize="10sp"
+                android:textColor="@color/cream_card"
+                android:background="@color/navy_surface"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:layout_marginEnd="6dp"
+                android:visibility="gone"/>
+
+            <!-- ✓ Sent / ⏳ Sending… / ⚠️ Not sent — outgoing only -->
+            <TextView
+                android:id="@+id/tvSendStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:textColor="@color/text_secondary"
+                android:layout_marginEnd="6dp"
+                android:visibility="gone"/>
+
+            <TextView
+                android:id="@+id/tvTimestamp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="@color/text_hint"
+                android:layout_marginEnd="6dp"/>
+
+            <TextView
+                android:id="@+id/tvEditHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="tap to edit"
+                android:textSize="11sp"
+                android:textColor="@color/gold_primary"
+                android:visibility="gone"/>
+        </LinearLayout>
+
+        <!-- ── "Transcribing…" placeholder ── -->
+        <LinearLayout
+            android:id="@+id/llTranscribing"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="EDITED"
-            android:textSize="10sp"
-            android:textColor="@color/cream_card"
-            android:background="@color/navy_surface"
-            android:paddingStart="6dp"
-            android:paddingEnd="6dp"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp"
-            android:layout_marginEnd="6dp"
-            android:visibility="gone"/>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone">
 
-        <!-- ✓ Sent / ⏳ Sending… / ⚠️ Not sent — outgoing only -->
-        <TextView
-            android:id="@+id/tvSendStatus"
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🎙️"
+                android:textSize="16sp"
+                android:layout_marginEnd="8dp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Transcribing…"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:textStyle="italic"/>
+        </LinearLayout>
+
+        <!-- ── Original-language bubble (own = navy, incoming = teal) ── -->
+        <LinearLayout
+            android:id="@+id/llOriginalRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="top"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvOriginal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:lineSpacingMultiplier="1.35"
+                android:padding="12dp"/>
+        </LinearLayout>
+
+        <!-- ── "Translating…" row ── -->
+        <LinearLayout
+            android:id="@+id/llTranslating"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="10sp"
-            android:textColor="@color/text_secondary"
-            android:layout_marginEnd="6dp"
-            android:visibility="gone"/>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone">
 
-        <TextView
-            android:id="@+id/tvEditHint"
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⏳ Translating…"
+                android:textSize="12sp"
+                android:textColor="@color/gold_primary"
+                android:textStyle="italic"/>
+        </LinearLayout>
+
+        <!-- ── Translation error row + retry button ── -->
+        <LinearLayout
+            android:id="@+id/llTranslationError"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvTranslationError"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="11sp"
+                android:textColor="@color/recording_red"
+                android:textStyle="italic"/>
+
+            <ImageButton
+                android:id="@+id/btnRetryTranslation"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:src="@android:drawable/ic_popup_sync"
+                android:background="@drawable/bubble_navy"
+                android:tint="@color/gold_primary"
+                android:padding="9dp"
+                android:contentDescription="Retry translation"
+                android:visibility="gone"/>
+        </LinearLayout>
+
+        <!-- ── Translation bubble (own = gold, incoming = lavender) + play + retry-TTS ── -->
+        <LinearLayout
+            android:id="@+id/llTranslationRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvTranslation"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/navy_deep"
+                android:textSize="13sp"
+                android:lineSpacingMultiplier="1.35"
+                android:padding="12dp"/>
+
+            <!-- ▶ Play button -->
+            <ImageButton
+                android:id="@+id/btnPlay"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:src="@android:drawable/ic_media_play"
+                android:background="@drawable/bubble_navy"
+                android:tint="@color/gold_primary"
+                android:padding="9dp"
+                android:contentDescription="Play translation"
+                android:visibility="gone"/>
+
+            <!-- ↻ Retry TTS button -->
+            <ImageButton
+                android:id="@+id/btnRetryTts"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:src="@android:drawable/ic_popup_sync"
+                android:background="@drawable/bubble_navy"
+                android:tint="@color/gold_primary"
+                android:padding="9dp"
+                android:contentDescription="Retry audio generation"
+                android:visibility="gone"/>
+        </LinearLayout>
+
+        <!-- ── "Generating audio…" row ── -->
+        <LinearLayout
+            android:id="@+id/llTtsLoading"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="tap to edit"
-            android:textSize="11sp"
-            android:textColor="@color/gold_primary"
-            android:visibility="gone"/>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔊 Generating audio…"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:textStyle="italic"/>
+        </LinearLayout>
+
+        <!-- ── TTS error row ── -->
+        <LinearLayout
+            android:id="@+id/llTtsError"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvTtsError"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="⚠️ Audio failed — tap ↻ to retry"
+                android:textSize="11sp"
+                android:textColor="@color/recording_red"
+                android:textStyle="italic"/>
+        </LinearLayout>
+
     </LinearLayout>
 
-    <!-- ── "Transcribing…" placeholder ── -->
-    <LinearLayout
-        android:id="@+id/llTranscribing"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginBottom="4dp"
-        android:visibility="gone">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="🎙️"
-            android:textSize="16sp"
-            android:layout_marginEnd="8dp"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Transcribing…"
-            android:textSize="13sp"
-            android:textColor="@color/text_secondary"
-            android:textStyle="italic"/>
-    </LinearLayout>
-
-    <!-- ── Indonesian bubble (navy) ── -->
-    <LinearLayout
-        android:id="@+id/llNavyRow"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="top"
-        android:layout_marginBottom="4dp"
-        android:visibility="gone">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="🇮🇩"
-            android:textSize="15sp"
-            android:layout_marginEnd="6dp"
-            android:layout_marginTop="4dp"/>
-
-        <TextView
-            android:id="@+id/tvOriginal"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="@drawable/bubble_navy"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:lineSpacingMultiplier="1.35"
-            android:padding="12dp"/>
-    </LinearLayout>
-
-    <!-- ── "Translating…" row ── -->
-    <LinearLayout
-        android:id="@+id/llTranslating"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="28dp"
-        android:layout_marginBottom="4dp"
-        android:visibility="gone">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="⏳ Translating…"
-            android:textSize="12sp"
-            android:textColor="@color/gold_primary"
-            android:textStyle="italic"/>
-    </LinearLayout>
-
-    <!-- ── Translation error row + retry button ── -->
-    <LinearLayout
-        android:id="@+id/llTranslationError"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="28dp"
-        android:layout_marginBottom="4dp"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/tvTranslationError"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="11sp"
-            android:textColor="@color/recording_red"
-            android:textStyle="italic"/>
-
-        <ImageButton
-            android:id="@+id/btnRetryTranslation"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_marginStart="8dp"
-            android:src="@android:drawable/ic_popup_sync"
-            android:background="@drawable/bubble_navy"
-            android:tint="@color/gold_primary"
-            android:padding="10dp"
-            android:contentDescription="Retry translation"
-            android:visibility="gone"/>
-    </LinearLayout>
-
-    <!-- ── Translation bubble (gold) + play + retry-TTS buttons ── -->
-    <LinearLayout
-        android:id="@+id/llGoldRow"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="28dp"
-        android:layout_marginBottom="4dp"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/tvTranslation"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="@drawable/bubble_gold"
-            android:textColor="@color/navy_deep"
-            android:textSize="13sp"
-            android:lineSpacingMultiplier="1.35"
-            android:padding="12dp"/>
-
-        <!-- ▶ Play button -->
-        <ImageButton
-            android:id="@+id/btnPlay"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_marginStart="8dp"
-            android:src="@android:drawable/ic_media_play"
-            android:background="@drawable/bubble_navy"
-            android:tint="@color/gold_primary"
-            android:padding="10dp"
-            android:contentDescription="Play translation"
-            android:visibility="gone"/>
-
-        <!-- ↻ Retry TTS button -->
-        <ImageButton
-            android:id="@+id/btnRetryTts"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_marginStart="8dp"
-            android:src="@android:drawable/ic_popup_sync"
-            android:background="@drawable/bubble_navy"
-            android:tint="@color/gold_primary"
-            android:padding="10dp"
-            android:contentDescription="Retry audio generation"
-            android:visibility="gone"/>
-    </LinearLayout>
-
-    <!-- ── "Generating audio…" row ── -->
-    <LinearLayout
-        android:id="@+id/llTtsLoading"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="28dp"
-        android:visibility="gone">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="🔊 Generating audio…"
-            android:textSize="12sp"
-            android:textColor="@color/text_secondary"
-            android:textStyle="italic"/>
-    </LinearLayout>
-
-    <!-- ── TTS error row ── -->
-    <LinearLayout
-        android:id="@+id/llTtsError"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="28dp"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/tvTtsError"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="⚠️ Audio failed — tap ↻ to retry"
-            android:textSize="11sp"
-            android:textColor="@color/recording_red"
-            android:textStyle="italic"/>
-    </LinearLayout>
+    <!-- Right spacer (shown only for outgoing/left-aligned messages) -->
+    <View
+        android:id="@+id/vSpacerEnd"
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_weight="1"
+        android:visibility="visible"/>
 
 </LinearLayout>

@@ -18,14 +18,13 @@ import androidx.core.app.ActivityCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.groqtranscriber.R
-import com.example.groqtranscriber.api.ApiProvider
-import com.example.groqtranscriber.api.GeminiClient
-import com.example.groqtranscriber.api.KieAiTtsClient
+import com.example.groqtranscriber.api.KieAiClient
 import com.example.groqtranscriber.api.TtsException
 import com.example.groqtranscriber.audio.AudioChunker
 import com.example.groqtranscriber.audio.AudioRecorder
 import com.example.groqtranscriber.model.ChatMessage
 import com.example.groqtranscriber.model.FirebaseRepository
+import com.example.groqtranscriber.model.Language
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.SessionStore
 import com.example.groqtranscriber.model.TranscriptEntry
@@ -43,9 +42,9 @@ class RecordingActivity : AppCompatActivity() {
     // ── Dependencies ──────────────────────────────────────────────────────────
     private lateinit var audioRecorder:  AudioRecorder
     private lateinit var audioChunker:   AudioChunker
-    private lateinit var geminiClient:   GeminiClient
-    private lateinit var targetLang:     String
-    private lateinit var provider:       ApiProvider
+    private lateinit var kieAiClient:    KieAiClient
+    private lateinit var myLanguage:     Language
+    private lateinit var theirLanguage:  Language
     private var mediaPlayer:             MediaPlayer? = null
 
     // ── Room / identity ───────────────────────────────────────────────────────
@@ -85,7 +84,7 @@ class RecordingActivity : AppCompatActivity() {
         btnClear  = findViewById(R.id.btnClear)
         rvFeed    = findViewById(R.id.rvFeed)
 
-        // ── Resolve API settings ──────────────────────────────────────────────
+        // ── Resolve API key (kie.ai only) ──────────────────────────────────────
         val prefs  = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("api_key", "") ?: ""
         if (apiKey.isEmpty()) {
@@ -93,21 +92,16 @@ class RecordingActivity : AppCompatActivity() {
             finish(); return
         }
 
-        val providerName = intent.getStringExtra("API_PROVIDER") ?: ApiProvider.GOOGLE_GEMINI.name
-        provider = try { ApiProvider.valueOf(providerName) }
-                   catch (_: IllegalArgumentException) { ApiProvider.GOOGLE_GEMINI }
+        // ── Language for this device ────────────────────────────────────────────
+        myLanguage    = Language.fromName(intent.getStringExtra("MY_LANGUAGE"))
+        theirLanguage = myLanguage.other
 
         // ── Room / identity ───────────────────────────────────────────────────
         roomCode = intent.getStringExtra("ROOM_CODE") ?: ""
         deviceId = prefs.getString("device_id", "") ?: ""
         nickname = prefs.getString("user_nickname", "") ?: ""
 
-        // ── TTS backend ───────────────────────────────────────────────────────
-        val kieAiTtsClient: KieAiTtsClient? =
-            if (!provider.useNativeGeminiTts) KieAiTtsClient(apiKey) else null
-
-        targetLang    = intent.getStringExtra("TARGET_LANG") ?: "English"
-        geminiClient  = GeminiClient(apiKey, provider, kieAiTtsClient)
+        kieAiClient   = KieAiClient(apiKey)
         audioRecorder = AudioRecorder(this)
         audioChunker  = AudioChunker(this)
 
@@ -124,8 +118,9 @@ class RecordingActivity : AppCompatActivity() {
         // ── RecyclerView ──────────────────────────────────────────────────────
         adapter = BubbleAdapter(
             context        = this,
-            geminiClient   = geminiClient,
-            targetLang     = targetLang,
+            kieAiClient    = kieAiClient,
+            myLanguage     = myLanguage,
+            theirLanguage  = theirLanguage,
             scope          = scope,
             onPlayRequest  = { filePath -> playAudio(filePath) },
             onEntryUpdated = { index, entry ->
@@ -151,8 +146,7 @@ class RecordingActivity : AppCompatActivity() {
         }
         btnExport.setOnClickListener {
             startActivity(Intent(this, ExportActivity::class.java).apply {
-                putExtra("TARGET_LANG",  targetLang)
-                putExtra("API_PROVIDER", provider.name)
+                putExtra("TARGET_LANG", theirLanguage.displayName)
             })
         }
         btnClear.setOnClickListener {
@@ -169,23 +163,8 @@ class RecordingActivity : AppCompatActivity() {
 
     /**
      * Attaches the Firebase ChildEventListener. When an incoming ChatMessage
-     * arrives, it is converted to a TranscriptEntry (marked isIncoming = true
-     * via a flag we store in the entry's id prefix) and the TTS phase is
-     * kicked off locally using the receiver's own API key.
-     *
-     * We reuse TranscriptEntry for display so BubbleAdapter needs zero changes
-     * to its data model. The isIncoming distinction is encoded as a negative id
-     * value — negative ids are incoming, positive ids are local.
-     * (The actual incoming ChatMessage id is stored separately in the entry's
-     * originalText metadata — see incomingEntryTag below.)
-     *
-     * Simpler encoding: we use a dedicated companion field on TranscriptEntry.
-     * Since TranscriptEntry doesn't yet have isIncoming, we use a naming
-     * convention: entries whose originalText starts with INCOMING_TAG are
-     * incoming. BubbleAdapter reads this tag to flip bubble layout.
-     *
-     * Actually — cleanest approach: add isIncoming directly to TranscriptEntry.
-     * That's the right call. TranscriptEntry already has it in the model above.
+     * arrives, it is converted to a TranscriptEntry (marked isIncoming = true)
+     * and the TTS phase is kicked off locally using the receiver's own API key.
      */
     private fun attachFirebaseListener() {
         firebaseRepo?.listenForMessages { chatMessage ->
@@ -201,12 +180,13 @@ class RecordingActivity : AppCompatActivity() {
      */
     private fun receiveIncomingMessage(msg: ChatMessage) {
         val entry = TranscriptEntry(
-            id             = System.currentTimeMillis(),
-            timestampStart = msg.timestampMs,
-            timestampEnd   = msg.timestampMs,
-            originalText   = msg.originalText,
-            translatedText = msg.translatedText,
-            isIncoming     = true,
+            id              = System.currentTimeMillis(),
+            timestampStart  = msg.timestampMs,
+            timestampEnd    = msg.timestampMs,
+            originalText    = msg.originalText,
+            translatedText  = msg.translatedText,
+            senderNickname  = msg.senderNickname,
+            isIncoming      = true,
             isGeneratingTts = msg.translatedText.isNotEmpty()
         )
         SessionData.entries.add(entry)
@@ -328,6 +308,7 @@ class RecordingActivity : AppCompatActivity() {
             val placeholder = TranscriptEntry(
                 timestampStart = startMs,
                 timestampEnd   = endMs,
+                senderNickname = nickname,
                 isTranscribing = true
             )
             SessionData.entries.add(placeholder)
@@ -342,7 +323,7 @@ class RecordingActivity : AppCompatActivity() {
                 tag        = "Transcription",
                 maxRetries = MAX_RETRIES
             ) {
-                withContext(Dispatchers.IO) { geminiClient.transcribeAudio(file) }
+                withContext(Dispatchers.IO) { kieAiClient.transcribeAudio(file, myLanguage) }
             }
 
             // Always clean up the audio file, regardless of success/failure
@@ -359,7 +340,7 @@ class RecordingActivity : AppCompatActivity() {
                 return@launch
             }
 
-            // Phase 1 succeeded — show Indonesian bubble, mark translating
+            // Phase 1 succeeded — show original-language bubble, mark translating
             if (index >= SessionData.entries.size) return@launch
             SessionData.entries[index] = SessionData.entries[index].copy(
                 originalText   = original,
@@ -376,7 +357,9 @@ class RecordingActivity : AppCompatActivity() {
                 tag        = "Translation",
                 maxRetries = MAX_RETRIES
             ) {
-                withContext(Dispatchers.IO) { geminiClient.translateText(original, targetLang) }
+                withContext(Dispatchers.IO) {
+                    kieAiClient.translateText(original, myLanguage, theirLanguage)
+                }
             }
 
             if (index >= SessionData.entries.size) return@launch
@@ -392,7 +375,7 @@ class RecordingActivity : AppCompatActivity() {
                 return@launch  // ← pipeline stops here; TTS and Firebase are skipped
             }
 
-            // Phase 2 succeeded — show gold bubble, mark TTS generating
+            // Phase 2 succeeded — show translated bubble, mark TTS generating
             SessionData.entries[index] = SessionData.entries[index].copy(
                 translatedText   = translated,
                 isTranslating    = false,
@@ -404,9 +387,8 @@ class RecordingActivity : AppCompatActivity() {
             // ═══════════════════════════════════════════════════════════════════
             // PHASE 3 — TTS
             // ═══════════════════════════════════════════════════════════════════
-            // Runs the shared TTS helper. Errors are recorded on ttsError;
-            // the pipeline continues to Phase 4 regardless (Firebase send
-            // does not depend on TTS succeeding).
+            // Errors are recorded on ttsError; the pipeline continues to Phase 4
+            // regardless (Firebase send does not depend on TTS succeeding).
             runTtsPhase(index)
 
             // ═══════════════════════════════════════════════════════════════════
@@ -446,10 +428,10 @@ class RecordingActivity : AppCompatActivity() {
         }
 
         val result: Result<String> = try {
-            val ttsBytes  = withContext(Dispatchers.IO) { geminiClient.generateTts(entry.translatedText) }
-            val ext       = geminiClient.ttsFileExtension()
+            val ttsBytes  = withContext(Dispatchers.IO) { kieAiClient.generateTts(entry.translatedText) }
+            val ext       = kieAiClient.ttsFileExtension()
             val audioFile = File(filesDir, "tts_${entry.id}.$ext")
-            withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToFile(ttsBytes, audioFile) }
+            withContext(Dispatchers.IO) { kieAiClient.writeTtsBytesToFile(ttsBytes, audioFile) }
             Result.success(audioFile.absolutePath)
         } catch (e: TtsException) {
             Result.failure(e)
@@ -497,7 +479,8 @@ class RecordingActivity : AppCompatActivity() {
             timestampMs    = timestampMs,
             originalText   = entry.originalText,
             translatedText = entry.translatedText,
-            targetLang     = targetLang
+            sourceLang     = myLanguage.name,
+            targetLang     = theirLanguage.name
         )
 
         repo.sendMessage(
@@ -585,8 +568,10 @@ class RecordingActivity : AppCompatActivity() {
     // ── UI states ─────────────────────────────────────────────────────────────
 
     private fun setIdleUi() {
-        tvStatus.text   = if (roomCode.isNotEmpty()) "Room: $roomCode · ${provider.displayName}"
-                          else "Ready · ${provider.displayName}"
+        tvStatus.text   = if (roomCode.isNotEmpty())
+            "Room: $roomCode · ${myLanguage.flag} → ${theirLanguage.flag}"
+        else
+            "Ready · ${myLanguage.flag} → ${theirLanguage.flag}"
         tvTimer.text    = formatTime(0)
         btnRecord.text  = "⏺  Record"
         btnRecord.alpha = 1f

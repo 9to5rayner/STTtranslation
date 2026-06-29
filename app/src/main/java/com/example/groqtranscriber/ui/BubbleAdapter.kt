@@ -12,8 +12,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 import com.example.groqtranscriber.R
-import com.example.groqtranscriber.api.GeminiClient
+import com.example.groqtranscriber.api.KieAiClient
 import com.example.groqtranscriber.api.TtsException
+import com.example.groqtranscriber.model.Language
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.TranscriptEntry
 import kotlinx.coroutines.CoroutineScope
@@ -23,21 +24,17 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Renders each TranscriptEntry as a chat bubble item.
+ * Renders each TranscriptEntry as a real chat-app bubble.
  *
- * OUTGOING (isIncoming = false) — right-reading layout:
- *   🕐 0:12  ·  tap to edit         [EDITED]  [✓ Sent / ⏳ Sending / ⚠️ Failed]
- *   🇮🇩  navy bubble
- *   🌐  gold bubble                                                    ▶  ↻(tts)
- *   ⚠️ Translation failed — tap ↻ to retry      ← translationError row
- *   ⚠️ Audio failed — tap ↻ to retry            ← ttsError row
+ * OUTGOING (isIncoming = false) — LEFT-aligned, own nickname, navy/gold bubbles:
+ *   [Me]  0:12  ·  tap to edit       [EDITED]  [✓ Sent / ⏳ Sending / ⚠️ Failed]
+ *   🗨  navy bubble (spoken language)
+ *   🗨  gold bubble (translated)                                       ▶  ↻(tts)
  *
- * INCOMING (isIncoming = true) — same layout, different label:
- *   🕐 0:12  · from Partner
- *   🇮🇩  navy bubble
- *   🌐  gold bubble                                                    ▶  ↻(tts)
- *   ⚠️ Audio failed — tap ↻ to retry
- *   (no edit hint, no send status, no translation retry — we don't own these)
+ * INCOMING (isIncoming = true) — RIGHT-aligned, partner's nickname, teal/lavender bubbles:
+ *                                                          0:12  [Partner]
+ *                                          teal bubble (their spoken language)  🗨
+ *                                  lavender bubble (translated for me)  🗨  ▶  ↻(tts)
  *
  * Pipeline gates enforced here:
  *   - retryTranslation: re-runs translation, then only proceeds to TTS if
@@ -47,23 +44,28 @@ import java.io.File
  */
 class BubbleAdapter(
     private val context:        Context,
-    private val geminiClient:   GeminiClient,
-    private val targetLang:     String,
+    private val kieAiClient:    KieAiClient,
+    private val myLanguage:     Language,
+    private val theirLanguage:  Language,
     private val scope:          CoroutineScope,
     private val onPlayRequest:  (filePath: String) -> Unit,
     private val onEntryUpdated: (index: Int, entry: TranscriptEntry) -> Unit
 ) : RecyclerView.Adapter<BubbleAdapter.BubbleVH>() {
 
     inner class BubbleVH(view: View) : RecyclerView.ViewHolder(view) {
+        val vSpacerStart:        View         = view.findViewById(R.id.vSpacerStart)
+        val vSpacerEnd:          View         = view.findViewById(R.id.vSpacerEnd)
+
+        val tvNickname:          TextView     = view.findViewById(R.id.tvNickname)
         val tvTimestamp:         TextView     = view.findViewById(R.id.tvTimestamp)
         val tvEditHint:          TextView     = view.findViewById(R.id.tvEditHint)
         val tvEdited:            TextView     = view.findViewById(R.id.tvEdited)
         val tvSendStatus:        TextView     = view.findViewById(R.id.tvSendStatus)
 
-        val llNavyRow:           LinearLayout = view.findViewById(R.id.llNavyRow)
+        val llOriginalRow:       LinearLayout = view.findViewById(R.id.llOriginalRow)
         val tvOriginal:          TextView     = view.findViewById(R.id.tvOriginal)
 
-        val llGoldRow:           LinearLayout = view.findViewById(R.id.llGoldRow)
+        val llTranslationRow:    LinearLayout = view.findViewById(R.id.llTranslationRow)
         val tvTranslation:       TextView     = view.findViewById(R.id.tvTranslation)
         val btnPlay:             ImageButton  = view.findViewById(R.id.btnPlay)
         val btnRetryTts:         ImageButton  = view.findViewById(R.id.btnRetryTts)
@@ -74,7 +76,6 @@ class BubbleAdapter(
         val llTtsError:          LinearLayout = view.findViewById(R.id.llTtsError)
         val tvTtsError:          TextView     = view.findViewById(R.id.tvTtsError)
 
-        // New views for translation error + retry
         val llTranslationError:  LinearLayout = view.findViewById(R.id.llTranslationError)
         val tvTranslationError:  TextView     = view.findViewById(R.id.tvTranslationError)
         val btnRetryTranslation: ImageButton  = view.findViewById(R.id.btnRetryTranslation)
@@ -90,8 +91,19 @@ class BubbleAdapter(
 
     private fun bind(h: BubbleVH, e: TranscriptEntry, pos: Int) {
 
-        // ── Timestamp + ownership label ───────────────────────────────────────
+        // ── Left/right alignment ──────────────────────────────────────────────
+        // Outgoing (own) = LEFT-aligned: hide the start spacer, show the end one.
+        // Incoming (partner) = RIGHT-aligned: show the start spacer, hide the end one.
+        h.vSpacerStart.visibility = if (e.isIncoming) View.VISIBLE else View.GONE
+        h.vSpacerEnd.visibility   = if (e.isIncoming) View.GONE else View.VISIBLE
+
+        // ── Nickname + timestamp ──────────────────────────────────────────────
+        h.tvNickname.text = e.senderNickname.ifBlank { if (e.isIncoming) "Partner" else "Me" }
+        h.tvNickname.setTextColor(
+            context.getColor(if (e.isIncoming) R.color.teal_deep else R.color.navy_deep)
+        )
         h.tvTimestamp.text = formatTs(e.timestampStart)
+
         h.tvEdited.visibility    = if (!e.isIncoming && e.isEdited) View.VISIBLE else View.GONE
         h.tvEditHint.visibility  = if (!e.isIncoming && e.originalText.isNotEmpty() &&
                                        !e.isTranscribing && !e.isTranslating &&
@@ -113,9 +125,11 @@ class BubbleAdapter(
         // ── Transcribing placeholder ──────────────────────────────────────────
         h.llTranscribing.visibility = if (e.isTranscribing) View.VISIBLE else View.GONE
 
-        // ── Indonesian bubble ─────────────────────────────────────────────────
-        h.llNavyRow.visibility = if (e.originalText.isNotEmpty()) View.VISIBLE else View.GONE
-        h.tvOriginal.text      = e.originalText
+        // ── Original-language bubble ──────────────────────────────────────────
+        val originalFlag = if (e.isIncoming) theirLanguage.flag else myLanguage.flag
+        h.llOriginalRow.visibility = if (e.originalText.isNotEmpty()) View.VISIBLE else View.GONE
+        h.tvOriginal.text = "$originalFlag ${e.originalText}"
+        h.tvOriginal.setBackgroundResource(if (e.isIncoming) R.drawable.bubble_teal else R.drawable.bubble_navy)
 
         // ── "Translating…" row ────────────────────────────────────────────────
         h.llTranslating.visibility = if (e.isTranslating) View.VISIBLE else View.GONE
@@ -135,8 +149,10 @@ class BubbleAdapter(
 
         // ── Translation bubble ────────────────────────────────────────────────
         val hasTranslation = e.translatedText.isNotEmpty()
-        h.llGoldRow.visibility = if (hasTranslation) View.VISIBLE else View.GONE
-        h.tvTranslation.text   = e.translatedText
+        val translationFlag = if (e.isIncoming) myLanguage.flag else theirLanguage.flag
+        h.llTranslationRow.visibility = if (hasTranslation) View.VISIBLE else View.GONE
+        h.tvTranslation.text = "$translationFlag ${e.translatedText}"
+        h.tvTranslation.setBackgroundResource(if (e.isIncoming) R.drawable.bubble_lavender else R.drawable.bubble_gold)
 
         // ── TTS loading row ───────────────────────────────────────────────────
         h.llTtsLoading.visibility = if (e.isGeneratingTts) View.VISIBLE else View.GONE
@@ -179,6 +195,9 @@ class BubbleAdapter(
      * Gate: originalText must be non-blank (should always be true at this point).
      * On success, clears translationError and proceeds to TTS.
      * On failure, updates translationError and stops.
+     *
+     * Only ever wired to outgoing (own) bubbles, so the direction is always
+     * myLanguage → theirLanguage.
      */
     fun retryTranslation(index: Int) {
         if (index < 0 || index >= SessionData.entries.size) return
@@ -200,7 +219,7 @@ class BubbleAdapter(
         scope.launch {
             val translated: String? = try {
                 withContext(Dispatchers.IO) {
-                    geminiClient.translateText(entry.originalText, targetLang)
+                    kieAiClient.translateText(entry.originalText, myLanguage, theirLanguage)
                 }.takeIf { it.isNotBlank() }
             } catch (e: Exception) {
                 null
@@ -272,10 +291,10 @@ class BubbleAdapter(
         }
 
         val result: Result<String> = try {
-            val ttsBytes  = withContext(Dispatchers.IO) { geminiClient.generateTts(entry.translatedText) }
-            val ext       = geminiClient.ttsFileExtension()
+            val ttsBytes  = withContext(Dispatchers.IO) { kieAiClient.generateTts(entry.translatedText) }
+            val ext       = kieAiClient.ttsFileExtension()
             val audioFile = File(context.filesDir, "tts_${entry.id}.$ext")
-            withContext(Dispatchers.IO) { geminiClient.writeTtsBytesToFile(ttsBytes, audioFile) }
+            withContext(Dispatchers.IO) { kieAiClient.writeTtsBytesToFile(ttsBytes, audioFile) }
             Result.success(audioFile.absolutePath)
         } catch (e: TtsException) {
             Result.failure(e)
@@ -350,7 +369,7 @@ class BubbleAdapter(
         scope.launch {
             val translated: String? = try {
                 withContext(Dispatchers.IO) {
-                    geminiClient.translateText(corrected, targetLang)
+                    kieAiClient.translateText(corrected, myLanguage, theirLanguage)
                 }.takeIf { it.isNotBlank() }
             } catch (e: Exception) { null }
 
@@ -385,7 +404,7 @@ class BubbleAdapter(
 
     private fun formatTs(wallMs: Long): String {
         val cal = java.util.Calendar.getInstance().apply { timeInMillis = wallMs }
-        return "🕐 %02d:%02d".format(
+        return "%02d:%02d".format(
             cal.get(java.util.Calendar.HOUR_OF_DAY),
             cal.get(java.util.Calendar.MINUTE)
         )

@@ -17,9 +17,9 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.example.groqtranscriber.R
-import com.example.groqtranscriber.api.ApiProvider
-import com.example.groqtranscriber.api.GeminiClient
+import com.example.groqtranscriber.api.KieAiClient
 import com.example.groqtranscriber.export.ExportHelper
+import com.example.groqtranscriber.model.Language
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.TranscriptEntry
 import kotlinx.coroutines.CoroutineScope
@@ -31,8 +31,9 @@ import java.io.File
 
 class ExportActivity : AppCompatActivity() {
 
-    private lateinit var targetLang: String
-    private lateinit var geminiClient: GeminiClient
+    private lateinit var myLanguage:    Language
+    private lateinit var theirLanguage: Language
+    private lateinit var kieAiClient:   KieAiClient
     private lateinit var llEntriesContainer: LinearLayout
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -41,20 +42,13 @@ class ExportActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_export)
 
-        targetLang = intent.getStringExtra("TARGET_LANG") ?: "English"
-
         val prefs  = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
         val apiKey = prefs.getString("api_key", "") ?: ""
 
-        // ── Resolve provider (same one used during recording) ──────────────
-        val providerName = intent.getStringExtra("API_PROVIDER") ?: ApiProvider.GOOGLE_GEMINI.name
-        val provider = try {
-            ApiProvider.valueOf(providerName)
-        } catch (e: IllegalArgumentException) {
-            ApiProvider.GOOGLE_GEMINI
-        }
+        myLanguage    = Language.fromName(prefs.getString("my_language", Language.INDONESIAN.name))
+        theirLanguage = myLanguage.other
 
-        geminiClient       = GeminiClient(apiKey, provider)
+        kieAiClient        = KieAiClient(apiKey)
         llEntriesContainer = findViewById(R.id.llEntriesContainer)
 
         val btnTxt  = findViewById<Button>(R.id.btnShareTxt)
@@ -65,7 +59,7 @@ class ExportActivity : AppCompatActivity() {
 
         btnTxt.setOnClickListener {
             if (SessionData.entries.isEmpty()) { toast("No entries to export."); return@setOnClickListener }
-            val content = ExportHelper.buildTxt(SessionData.entries, targetLang)
+            val content = ExportHelper.buildTxt(SessionData.entries, theirLanguage.displayName)
             shareFile(ExportHelper.createTempFile(this, content, "session.txt"), "text/plain")
         }
 
@@ -77,7 +71,7 @@ class ExportActivity : AppCompatActivity() {
 
         btnCopy.setOnClickListener {
             if (SessionData.entries.isEmpty()) { toast("Nothing to copy."); return@setOnClickListener }
-            val content   = ExportHelper.buildTxt(SessionData.entries, targetLang)
+            val content   = ExportHelper.buildTxt(SessionData.entries, theirLanguage.displayName)
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Transcription", content))
             toast("Copied to clipboard!")
@@ -102,9 +96,12 @@ class ExportActivity : AppCompatActivity() {
             val tvTranslation  = cardView.findViewById<TextView>(R.id.tvTranslation)
             val tvRetranslating = cardView.findViewById<TextView>(R.id.tvRetranslating)
 
-            tvTimestamp.text   = formatTimestampRange(entry.timestampStart, entry.timestampEnd)
-            tvOriginal.text    = "🇮🇩 ${entry.originalText}"
-            tvTranslation.text = "🌐 ${entry.translatedText}"
+            val sourceFlag = if (entry.isIncoming) theirLanguage.flag else myLanguage.flag
+            val targetFlag = if (entry.isIncoming) myLanguage.flag else theirLanguage.flag
+
+            tvTimestamp.text   = "${entry.senderNickname.ifBlank { "—" }} · ${formatTimestampRange(entry.timestampStart, entry.timestampEnd)}"
+            tvOriginal.text    = "$sourceFlag ${entry.originalText}"
+            tvTranslation.text = "$targetFlag ${entry.translatedText}"
 
             cardView.setOnClickListener {
                 showEditDialog(index, entry, tvOriginal, tvTranslation, tvRetranslating)
@@ -147,27 +144,30 @@ class ExportActivity : AppCompatActivity() {
         tvRetranslating: TextView
     ) {
         val currentEntry = SessionData.entries[index]
-        tvOriginal.text          = "🇮🇩 $correctedOriginal"
+        val sourceFlag = if (currentEntry.isIncoming) theirLanguage.flag else myLanguage.flag
+        val targetFlag = if (currentEntry.isIncoming) myLanguage.flag else theirLanguage.flag
+
+        tvOriginal.text           = "$sourceFlag $correctedOriginal"
         tvTranslation.visibility  = View.GONE
         tvRetranslating.visibility = View.VISIBLE
 
         scope.launch {
             try {
+                val srcLang = if (currentEntry.isIncoming) theirLanguage else myLanguage
+                val tgtLang = if (currentEntry.isIncoming) myLanguage else theirLanguage
                 val newTranslation = withContext(Dispatchers.IO) {
-                    geminiClient.translateText(correctedOriginal, targetLang)
+                    kieAiClient.translateText(correctedOriginal, srcLang, tgtLang)
                 }
-                SessionData.entries[index] = TranscriptEntry(
-                    timestampStart = currentEntry.timestampStart,
-                    timestampEnd   = currentEntry.timestampEnd,
+                SessionData.entries[index] = currentEntry.copy(
                     originalText   = correctedOriginal,
                     translatedText = newTranslation
                 )
-                tvTranslation.text         = "🌐 $newTranslation"
+                tvTranslation.text         = "$targetFlag $newTranslation"
                 tvTranslation.visibility   = View.VISIBLE
                 tvRetranslating.visibility  = View.GONE
             } catch (e: Exception) {
                 e.printStackTrace()
-                tvTranslation.text         = "🌐 [Translation failed: ${e.message}]"
+                tvTranslation.text         = "$targetFlag [Translation failed: ${e.message}]"
                 tvTranslation.visibility   = View.VISIBLE
                 tvRetranslating.visibility  = View.GONE
                 toast("Re-translation failed.")
