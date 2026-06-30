@@ -45,6 +45,9 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
+    // Encrypted local storage (Android Keystore-backed) for the kie.ai API key
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // ── Firebase ──────────────────────────────────────────────────────────────
     // BOM manages all Firebase library versions so they stay in sync.
     // Only add libraries actually used — don't pull in the whole SDK.

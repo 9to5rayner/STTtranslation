@@ -2,7 +2,6 @@ package com.example.groqtranscriber.ui
 
 import android.Manifest
 import android.animation.ObjectAnimator
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
@@ -29,6 +28,7 @@ import com.example.groqtranscriber.model.Language
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.SessionStore
 import com.example.groqtranscriber.model.TranscriptEntry
+import com.example.groqtranscriber.storage.SecurePrefs
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -93,8 +93,9 @@ class RecordingActivity : AppCompatActivity() {
         btnClear  = findViewById(R.id.btnClear)
         rvFeed    = findViewById(R.id.rvFeed)
 
-        val prefs  = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
-        val apiKey = prefs.getString("api_key", "") ?: ""
+        // ── Encrypted storage (Android Keystore-backed) for the API key ──────
+        val securePrefs = SecurePrefs.get(this)
+        val apiKey = securePrefs.getString("api_key", "") ?: ""
         if (apiKey.isEmpty()) {
             Toast.makeText(this, "No API key — please go back.", Toast.LENGTH_LONG).show()
             finish(); return

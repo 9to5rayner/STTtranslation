@@ -1,12 +1,12 @@
 package com.example.groqtranscriber.ui
 
-import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import com.example.groqtranscriber.R
 import com.example.groqtranscriber.model.Language
+import com.example.groqtranscriber.storage.SecurePrefs
 
 class LaunchActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -17,7 +17,9 @@ class LaunchActivity : AppCompatActivity() {
         val rgLanguage = findViewById<RadioGroup>(R.id.rgLanguage)
         val btnLaunch  = findViewById<Button>(R.id.btnLaunch)
 
-        val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
+        // ── Encrypted storage (Android Keystore-backed) for the API key ──────
+        // See SecurePrefs.kt for why this replaced plain SharedPreferences.
+        val prefs = SecurePrefs.get(this)
 
         // ── Restore saved API key ──────────────────────────────────────────
         etApiKey.setText(prefs.getString("api_key", ""))
@@ -44,7 +46,7 @@ class LaunchActivity : AppCompatActivity() {
                 Language.INDONESIAN
             }
 
-            // Persist choices
+            // Persist choices — api_key is encrypted at rest via SecurePrefs.
             prefs.edit()
                 .putString("api_key", key)
                 .putString("my_language", myLanguage.name)

@@ -22,6 +22,7 @@ import com.example.groqtranscriber.export.ExportHelper
 import com.example.groqtranscriber.model.Language
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.TranscriptEntry
+import com.example.groqtranscriber.storage.SecurePrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,10 +43,13 @@ class ExportActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_export)
 
-        val prefs  = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
-        val apiKey = prefs.getString("api_key", "") ?: ""
+        // ── Encrypted storage (Android Keystore-backed) for the API key ──────
+        // "my_language" is non-sensitive and could stay in plain prefs, but
+        // both now live in SecurePrefs to avoid juggling two prefs files.
+        val securePrefs = SecurePrefs.get(this)
+        val apiKey = securePrefs.getString("api_key", "") ?: ""
 
-        myLanguage    = Language.fromName(prefs.getString("my_language", Language.INDONESIAN.name))
+        myLanguage    = Language.fromName(securePrefs.getString("my_language", Language.INDONESIAN.name))
         theirLanguage = myLanguage.other
 
         kieAiClient        = KieAiClient(apiKey)
