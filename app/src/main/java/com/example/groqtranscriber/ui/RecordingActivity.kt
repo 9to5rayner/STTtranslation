@@ -29,6 +29,7 @@ import com.example.groqtranscriber.model.Language
 import com.example.groqtranscriber.model.SessionData
 import com.example.groqtranscriber.model.SessionStore
 import com.example.groqtranscriber.model.TranscriptEntry
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -51,6 +52,11 @@ class RecordingActivity : AppCompatActivity() {
     private var mediaPlayer:             MediaPlayer? = null
 
     // ── Room / identity ───────────────────────────────────────────────────────
+    // deviceId now comes from FirebaseAuth.currentUser.uid — stable per
+    // account (not per install), survives reinstall/device-switch, and is
+    // guaranteed unique server-side (unlike the old random local UUID).
+    // nickname comes from FirebaseAuth.currentUser.displayName, set once at
+    // registration in AuthActivity.
     private lateinit var roomCode:   String
     private lateinit var deviceId:   String
     private lateinit var nickname:   String
@@ -94,18 +100,28 @@ class RecordingActivity : AppCompatActivity() {
             finish(); return
         }
 
+        // ── Identity from FirebaseAuth (replaces old device_id/nickname prefs) ──
+        val currentUser = FirebaseAuth.getInstance().currentUser
+        if (currentUser == null) {
+            // Should not happen — RoomActivity already gates on auth — but
+            // guard anyway rather than proceeding with a blank identity.
+            Toast.makeText(this, "Session expired — please log in again.", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, AuthActivity::class.java))
+            finish(); return
+        }
+        deviceId = currentUser.uid
+        nickname = currentUser.displayName?.takeIf { it.isNotBlank() } ?: "User"
+
         myLanguage    = Language.fromName(intent.getStringExtra("MY_LANGUAGE"))
         theirLanguage = myLanguage.other
 
         roomCode = intent.getStringExtra("ROOM_CODE") ?: ""
-        deviceId = prefs.getString("device_id", "") ?: ""
-        nickname = prefs.getString("user_nickname", "") ?: ""
 
         kieAiClient   = KieAiClient(apiKey)
         audioRecorder = AudioRecorder(this)
         audioChunker  = AudioChunker(this)
 
-        if (roomCode.isNotEmpty() && deviceId.isNotEmpty()) {
+        if (roomCode.isNotEmpty()) {
             firebaseRepo = FirebaseRepository(roomCode, deviceId)
             attachFirebaseListener()
         }
@@ -271,7 +287,7 @@ class RecordingActivity : AppCompatActivity() {
     // ── Pipeline ──────────────────────────────────────────────────────────────
     //
     // Phase 1 → Transcription
-    // Phase 1.5 → Confirm / Edit dialog  ← NEW
+    // Phase 1.5 → Confirm / Edit dialog
     // Phase 2 → Translation
     // Phase 3 → TTS
     // Phase 4 → Firebase send

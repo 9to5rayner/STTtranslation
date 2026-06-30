@@ -12,8 +12,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.GroqTranscriber">
 
+        <!-- AuthActivity is now the entry point: register / login / email
+             verification gate must clear before anything else loads. -->
         <activity
-            android:name=".ui.LaunchActivity"
+            android:name=".ui.AuthActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -21,9 +23,10 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".ui.RoomActivity"    android:exported="false" />
-        <activity android:name=".ui.RecordingActivity" android:exported="false" />
-        <activity android:name=".ui.ExportActivity"    android:exported="false" />
+        <activity android:name=".ui.LaunchActivity"     android:exported="false" />
+        <activity android:name=".ui.RoomActivity"        android:exported="false" />
+        <activity android:name=".ui.RecordingActivity"   android:exported="false" />
+        <activity android:name=".ui.ExportActivity"      android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

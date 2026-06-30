@@ -10,7 +10,9 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.example.groqtranscriber.R
 import com.example.groqtranscriber.model.Language
-import java.util.UUID
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.firebase.auth.FirebaseAuth
 
 /**
  * Room entry screen — sits between LaunchActivity and RecordingActivity.
@@ -20,61 +22,71 @@ import java.util.UUID
  *    it, and waits for the user to tap "Start" once their partner has joined.
  *  - JOIN: user types in the code their partner shared, then taps "Join".
  *
- * A nickname is now REQUIRED — it's shown on every chat bubble (own messages
- * on the left under your name, partner's on the right under theirs), so an
- * empty name would make the chat impossible to follow.
+ * IDENTITY (post Firebase-Auth migration):
+ *   The nickname shown on chat bubbles is no longer typed here — it comes
+ *   from FirebaseAuth.currentUser.displayName, set once at registration in
+ *   AuthActivity. This screen only displays it for confirmation.
  *
- * In both cases, the room code and this device's stable UUID are written to
- * SharedPreferences before RecordingActivity is launched.
+ *   Likewise, the per-device random UUID ("device_id") has been retired.
+ *   FirebaseAuth.currentUser.uid is now the single source of identity used
+ *   everywhere a sender needs to be distinguished (ChatMessage.senderId,
+ *   FirebaseRepository's myDeviceId parameter).
  *
- * Device identity:
- *   A UUID is generated once on first run and stored as "device_id".
- *   It never changes. The nickname ("user_nickname") is required from here on.
+ * A signed-in, verified user is guaranteed by the time this Activity is
+ * reached — AuthActivity gates everything before LaunchActivity, which is
+ * the only screen that can lead here.
  */
 class RoomActivity : AppCompatActivity() {
 
     // ── Views ─────────────────────────────────────────────────────────────────
-    private lateinit var etNickname:    EditText
-    private lateinit var tvRoomCode:    TextView
-    private lateinit var btnCreate:     Button
-    private lateinit var btnStartRoom:  Button
-    private lateinit var etJoinCode:    EditText
-    private lateinit var btnJoin:       Button
+    private lateinit var tvNicknameDisplay: TextView
+    private lateinit var tvRoomCode:        TextView
+    private lateinit var btnCreate:         Button
+    private lateinit var btnStartRoom:      Button
+    private lateinit var etJoinCode:        EditText
+    private lateinit var btnJoin:           Button
+    private lateinit var btnSignOut:        TextView
 
     // ── Extra passed from LaunchActivity ────────────────────────────────────
-    private lateinit var myLanguage:    String
+    private lateinit var myLanguage: String
+
+    private lateinit var auth: FirebaseAuth
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_room)
 
-        myLanguage = intent.getStringExtra("MY_LANGUAGE") ?: Language.INDONESIAN.name
+        auth = FirebaseAuth.getInstance()
 
-        etNickname   = findViewById(R.id.etNickname)
-        tvRoomCode   = findViewById(R.id.tvRoomCode)
-        btnCreate    = findViewById(R.id.btnCreate)
-        btnStartRoom = findViewById(R.id.btnStartRoom)
-        etJoinCode   = findViewById(R.id.etJoinCode)
-        btnJoin      = findViewById(R.id.btnJoin)
-
-        val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
-
-        // ── Ensure this device has a stable UUID ───────────────────────────────
-        if (!prefs.contains("device_id")) {
-            prefs.edit().putString("device_id", UUID.randomUUID().toString()).apply()
+        // Safety net: if somehow reached without a signed-in user, bounce back
+        // to the auth gate rather than crashing later on a null uid.
+        val user = auth.currentUser
+        if (user == null) {
+            startActivity(Intent(this, AuthActivity::class.java))
+            finish()
+            return
         }
 
-        // ── Restore nickname if previously set ─────────────────────────────────
-        etNickname.setText(prefs.getString("user_nickname", ""))
+        myLanguage = intent.getStringExtra("MY_LANGUAGE") ?: Language.INDONESIAN.name
+
+        tvNicknameDisplay = findViewById(R.id.tvNicknameDisplay)
+        tvRoomCode        = findViewById(R.id.tvRoomCode)
+        btnCreate         = findViewById(R.id.btnCreate)
+        btnStartRoom      = findViewById(R.id.btnStartRoom)
+        etJoinCode        = findViewById(R.id.etJoinCode)
+        btnJoin           = findViewById(R.id.btnJoin)
+        btnSignOut        = findViewById(R.id.btnSignOut)
+
+        // Display name comes straight from the auth profile now.
+        val displayName = user.displayName?.takeIf { it.isNotBlank() } ?: "User"
+        tvNicknameDisplay.text = displayName
 
         // ── CREATE path ────────────────────────────────────────────────────────
 
         btnCreate.setOnClickListener {
-            if (!requireNickname()) return@setOnClickListener
             val code = generateRoomCode()
             tvRoomCode.text = code
             btnStartRoom.isEnabled = true
-            // Copy to clipboard as a convenience
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
             clipboard.setPrimaryClip(
@@ -84,7 +96,6 @@ class RoomActivity : AppCompatActivity() {
         }
 
         btnStartRoom.setOnClickListener {
-            if (!requireNickname()) return@setOnClickListener
             val code = tvRoomCode.text.toString().trim()
             if (code.length != ROOM_CODE_LENGTH) {
                 Toast.makeText(this, "Tap 'Create Room' first.", Toast.LENGTH_SHORT).show()
@@ -96,7 +107,6 @@ class RoomActivity : AppCompatActivity() {
         // ── JOIN path ──────────────────────────────────────────────────────────
 
         btnJoin.setOnClickListener {
-            if (!requireNickname()) return@setOnClickListener
             val raw = etJoinCode.text.toString().trim().uppercase()
             if (raw.length != ROOM_CODE_LENGTH) {
                 Toast.makeText(
@@ -108,28 +118,30 @@ class RoomActivity : AppCompatActivity() {
             }
             launchRecording(raw)
         }
+
+        // ── Sign out ───────────────────────────────────────────────────────────
+
+        btnSignOut.setOnClickListener {
+            auth.signOut()
+            // Also clear the Google session — otherwise GoogleSignInClient
+            // silently re-authenticates the same account on next launch
+            // instead of showing the account picker (Google caches the
+            // last-used account on-device, independent of FirebaseAuth state).
+            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestEmail()
+                .build()
+            GoogleSignIn.getClient(this, gso).signOut()
+            startActivity(Intent(this, AuthActivity::class.java))
+            finish()
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /** Returns true if a non-blank nickname is present; otherwise shows a toast and returns false. */
-    private fun requireNickname(): Boolean {
-        val name = etNickname.text.toString().trim()
-        if (name.isEmpty()) {
-            Toast.makeText(this, "Please enter your name first.", Toast.LENGTH_SHORT).show()
-            return false
-        }
-        return true
-    }
-
     private fun launchRecording(roomCode: String) {
+        // Persist only the room code locally — identity now lives in
+        // FirebaseAuth, not SharedPreferences.
         val prefs = getSharedPreferences("GroqPrefs", Context.MODE_PRIVATE)
-
-        // Persist nickname (now guaranteed non-blank by requireNickname())
-        val nickname = etNickname.text.toString().trim()
-        prefs.edit().putString("user_nickname", nickname).apply()
-
-        // Persist room code for the session
         prefs.edit().putString("current_room", roomCode).apply()
 
         startActivity(
