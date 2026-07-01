@@ -52,12 +52,22 @@ class AuthActivity : AppCompatActivity() {
 
     private val googleSignInLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            android.util.Log.d("AuthActivity", "Activity result code: ${result.resultCode}")
             if (result.resultCode == Activity.RESULT_OK) {
                 val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
                 handleGoogleSignInResult(task)
-            } else {
-                // User dismissed the account picker — not an error, just no-op.
+            } else if (result.resultCode == Activity.RESULT_CANCELED) {
+                // User backed out of the picker deliberately — not an error.
                 setLoading(false)
+            } else {
+                // Anything else is an actual failure from Play Services
+                // (e.g. misconfigured SHA-1, mismatched package name).
+                // The previous version silently swallowed this — that's
+                // almost certainly what "picker shows, then nothing happens"
+                // was: an error being treated as a no-op cancellation.
+                setLoading(false)
+                toast("Google sign-in failed (code ${result.resultCode}). " +
+                      "Check Logcat tag 'AuthActivity' for details.")
             }
         }
 
@@ -123,9 +133,14 @@ class AuthActivity : AppCompatActivity() {
         } catch (e: ApiException) {
             setLoading(false)
             // Status code 10 = DEVELOPER_ERROR, almost always a wrong/missing
-            // WEB_CLIENT_ID or a SHA-1 fingerprint not registered in the
-            // Firebase Console for this app.
-            toast("Google sign-in error (code ${e.statusCode}).")
+            // WEB_CLIENT_ID or — far more commonly — a SHA-1 fingerprint not
+            // registered in the Firebase Console for this app's package name.
+            android.util.Log.e(
+                "AuthActivity",
+                "Google sign-in ApiException — statusCode=${e.statusCode}, message=${e.message}",
+                e
+            )
+            toast("Google sign-in error (code ${e.statusCode}). See Logcat tag 'AuthActivity'.")
         }
     }
 

@@ -17,7 +17,33 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        // Uses the stable keystore passed in via environment variables from
+        // GitHub Actions secrets (see .github/workflows/compile.yml).
+        // Falls back gracefully to the default debug keystore when building
+        // locally without those env vars set (e.g. in Android Studio).
+        create("stableDebug") {
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+            val keyAlias = System.getenv("KEY_ALIAS")
+            val keyPassword = System.getenv("KEY_PASSWORD")
+
+            if (keystorePath != null && keystorePassword != null &&
+                keyAlias != null && keyPassword != null) {
+                storeFile = file(keystorePath)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+            // If env vars are absent (local build), Gradle falls back to the
+            // default debug signing behaviour automatically.
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("stableDebug")
+        }
         release {
             isMinifyEnabled = false
         }

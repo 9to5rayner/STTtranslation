@@ -15,6 +15,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "99859064289-k3p72erq1krdj2avm7clup0ombduqo0i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.groqtranscriber",
+            "certificate_hash": "51f2ef29ccf175d0a936811b0a7e263d31cfafa9"
+          }
+        },
+        {
           "client_id": "99859064289-q5ntou392sqsja1ed75163dm4l91mtfg.apps.googleusercontent.com",
           "client_type": 3
         }

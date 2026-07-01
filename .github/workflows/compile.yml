@@ -28,7 +28,30 @@ jobs:
         sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.11.1-bin.zip|' gradle/wrapper/gradle-wrapper.properties
         chmod +x gradlew
 
+    # ── Stable debug keystore ──────────────────────────────────────────────
+    # Decodes the keystore from the GitHub secret and places it where the
+    # build expects it. Using a stored keystore (instead of a freshly
+    # generated one) means every build is signed with the same key, so
+    # the SHA-1 fingerprint registered in the Firebase Console never changes.
+    - name: Decode Debug Keystore
+      run: |
+        echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 --decode > $HOME/debug.keystore
+        echo "KEYSTORE_PATH=$HOME/debug.keystore" >> $GITHUB_ENV
+
+    - name: Print SHA-1 (visible in Actions log for Firebase registration)
+      run: |
+        keytool -list -v \
+          -keystore $HOME/debug.keystore \
+          -alias ${{ secrets.DEBUG_KEY_ALIAS }} \
+          -storepass ${{ secrets.DEBUG_KEYSTORE_PASSWORD }} \
+          | grep "SHA1:"
+
     - name: Build Debug APK
+      env:
+        KEYSTORE_PATH:          ${{ env.KEYSTORE_PATH }}
+        KEYSTORE_PASSWORD:      ${{ secrets.DEBUG_KEYSTORE_PASSWORD }}
+        KEY_ALIAS:              ${{ secrets.DEBUG_KEY_ALIAS }}
+        KEY_PASSWORD:           ${{ secrets.DEBUG_KEY_PASSWORD }}
       run: ./gradlew assembleDebug --stacktrace
 
     - name: Upload Finished APK
